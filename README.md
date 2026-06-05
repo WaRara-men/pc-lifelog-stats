@@ -77,6 +77,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\enable_android_sender_fire
 
 Android側はこの情報を保存し、以後は `POST /api/android/events` にtoken付きで送信します。
 
+Androidアプリ本体は `android-sender/` にあります。Android Studioで開いて `app` モジュールをビルドします。
+
 ## Data Safety
 
 このアプリはActivityWatchのローカルAPIを読み取るだけです。ActivityWatchのデータを書き換えません。

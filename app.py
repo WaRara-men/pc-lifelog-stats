@@ -143,55 +143,138 @@ def is_private_ipv4(value: str) -> bool:
     return False
 
 
-def get_pairing_host() -> str:
-    override = LOCAL_DATA_DIR / "pairing_host.txt"
-    if override.exists():
-        value = override.read_text(encoding="utf-8").strip()
-        if value:
-            return value
-    candidates = []
+def is_tailscale_ipv4(value: str) -> bool:
+    parts = value.split(".")
+    if len(parts) != 4:
+        return False
     try:
-        ipconfig = subprocess.check_output(["ipconfig"], text=True, encoding="utf-8", errors="ignore")
+        nums = [int(part) for part in parts]
+    except ValueError:
+        return False
+    return nums[0] == 100 and 64 <= nums[1] <= 127
+
+
+def is_linklocal_ipv4(value: str) -> bool:
+    return value.startswith("169.254.")
+
+
+def detect_ipv4_candidates() -> list[dict]:
+    seen = set()
+    results: list[dict] = []
+
+    def add(ip: str, source: str, interface: str = ""):
+        ip = ip.strip()
+        if not ip or ip.startswith("127.") or is_linklocal_ipv4(ip) or ip in seen:
+            return
+        seen.add(ip)
+        if is_tailscale_ipv4(ip):
+            kind = "tailscale"
+            priority = 0
+        elif is_private_ipv4(ip):
+            kind = "lan"
+            priority = 1
+        else:
+            kind = "network"
+            priority = 2
+        results.append({"ip": ip, "type": kind, "source": source, "interface": interface, "priority": priority})
+
+    try:
+        ps = subprocess.check_output(
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                "Get-NetIPAddress -AddressFamily IPv4 | "
+                "Where-Object { $_.IPAddress -notlike '127.*' -and $_.AddressState -ne 'Deprecated' } | "
+                "Select-Object InterfaceAlias,IPAddress | ConvertTo-Json -Compress",
+            ],
+            text=True,
+            encoding="utf-8",
+            errors="ignore",
+            timeout=5,
+        )
+        data = json.loads(ps) if ps.strip() else []
+        if isinstance(data, dict):
+            data = [data]
+        if isinstance(data, list):
+            for item in data:
+                if isinstance(item, dict):
+                    add(str(item.get("IPAddress") or ""), "Get-NetIPAddress", str(item.get("InterfaceAlias") or ""))
+    except Exception:
+        pass
+
+    try:
+        ipconfig = subprocess.check_output(["ipconfig"], text=True, encoding="utf-8", errors="ignore", timeout=5)
+        current_interface = ""
         for line in ipconfig.splitlines():
+            stripped = line.strip()
+            if stripped.endswith(":") and "adapter" in stripped.lower():
+                current_interface = stripped.rstrip(":")
             if "IPv4" not in line:
                 continue
             ip = line.split(":")[-1].strip()
-            if ip and not ip.startswith("127."):
-                candidates.append(ip)
+            add(ip, "ipconfig", current_interface)
     except Exception:
         pass
+
     try:
         hostname = socket.gethostname()
         for info in socket.getaddrinfo(hostname, None, socket.AF_INET):
-            ip = info[4][0]
-            if not ip.startswith("127."):
-                candidates.append(ip)
+            add(info[4][0], "hostname")
     except Exception:
         pass
-    for ip in candidates:
-        if is_private_ipv4(ip):
-            return ip
-    if candidates:
-        return candidates[0]
+
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.connect(("8.8.8.8", 80))
-        return sock.getsockname()[0]
+        add(sock.getsockname()[0], "default-route")
     except Exception:
-        return "127.0.0.1"
+        pass
     finally:
         try:
             sock.close()
         except Exception:
             pass
 
+    return sorted(results, key=lambda item: (item["priority"], item["ip"]))
+
+
+def get_pairing_host() -> str:
+    override = LOCAL_DATA_DIR / "pairing_host.txt"
+    if override.exists():
+        value = override.read_text(encoding="utf-8").strip()
+        if value:
+            return value
+    candidates = [item["ip"] for item in detect_ipv4_candidates()]
+    for ip in candidates:
+        if is_private_ipv4(ip):
+            return ip
+    for ip in candidates:
+        if is_tailscale_ipv4(ip):
+            return ip
+    if candidates:
+        return candidates[0]
+    return "127.0.0.1"
+
 
 def get_pairing_payload() -> dict:
-    host = get_pairing_host()
-    server = f"http://{host}:{RECEIVER_PORT}"
+    endpoints = [
+        {
+            "type": item["type"],
+            "url": f"http://{item['ip']}:{RECEIVER_PORT}",
+            "host": item["ip"],
+            "interface": item.get("interface", ""),
+            "priority": item["priority"],
+        }
+        for item in detect_ipv4_candidates()
+    ]
+    if not endpoints:
+        endpoints.append({"type": "localhost", "url": f"http://127.0.0.1:{RECEIVER_PORT}", "host": "127.0.0.1", "priority": 9})
+    primary = endpoints[0]["url"]
     return {
         "name": "PC Lifelog Stats",
-        "server": server,
+        "server": primary,
+        "endpoints": endpoints,
         "token": get_sender_token(),
         "version": 1,
         "once": True,
@@ -264,7 +347,8 @@ def get_sender_status() -> dict:
         status = {}
     status["configured"] = SENDER_TOKEN_PATH.exists()
     status["events"] = len(load_sender_android_events())
-    status["receiver"] = f"http://{get_pairing_host()}:{RECEIVER_PORT}"
+    status["receiver"] = get_pairing_payload()["server"]
+    status["endpoints"] = get_pairing_payload()["endpoints"]
     return status
 
 
@@ -739,6 +823,7 @@ INDEX_HTML = r"""<!doctype html>
     .qr-box.visible { display: block; }
     .qr-box img { display: block; width: 190px; height: 190px; }
     .mono { font-family: Consolas, "SFMono-Regular", monospace; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+    .endpoint-list { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
     .bars { display: flex; flex-direction: column; gap: 10px; }
     .bar-row { display: grid; grid-template-columns: minmax(120px, 1fr) 80px; gap: 10px; align-items: center; }
     .bar-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
@@ -811,6 +896,7 @@ INDEX_HTML = r"""<!doctype html>
         <div>
           <div id="senderSummary" class="sub">接続状態を確認中...</div>
           <div id="senderUrl" class="mono"></div>
+          <div id="senderEndpoints" class="endpoint-list mono"></div>
           <div class="pairing-actions">
             <button id="showQr">接続QRを表示</button>
             <button id="hideQr">QRを隠す</button>
@@ -916,7 +1002,11 @@ INDEX_HTML = r"""<!doctype html>
       const last = status.last_received_at ? `最終受信 ${status.last_received_at.replace('T', ' ')}` : 'まだSenderからの受信なし';
       const events = Number(data.senderAndroidEvents || 0);
       document.getElementById('senderSummary').textContent = `Senderイベント ${events}件 / ${last}`;
-      document.getElementById('senderUrl').textContent = status.receiver ? `受信先: ${status.receiver}` : '';
+      document.getElementById('senderUrl').textContent = status.receiver ? `優先受信先: ${status.receiver}` : '';
+      const endpoints = Array.isArray(status.endpoints) ? status.endpoints : [];
+      document.getElementById('senderEndpoints').innerHTML = endpoints.map(ep =>
+        `<div>${esc(ep.type || 'endpoint')}: ${esc(ep.url || '')}</div>`
+      ).join('');
     }
 
     function renderInsights(data) {
@@ -991,6 +1081,21 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/android/status":
             self.send_json({"ok": True, "status": get_sender_status()})
+            return
+        if parsed.path == "/api/android/ping":
+            qs = parse_qs(parsed.query)
+            token = (qs.get("token") or [""])[0] or self.headers.get("X-PC-Lifelog-Token", "")
+            if not secrets.compare_digest(token, get_sender_token()):
+                self.send_json({"ok": False, "message": "unauthorized"}, status=401)
+                return
+            self.send_json(
+                {
+                    "ok": True,
+                    "name": "PC Lifelog Stats",
+                    "time": datetime.now(JST).isoformat(timespec="seconds"),
+                    "receiverPort": RECEIVER_PORT,
+                }
+            )
             return
         if parsed.path == "/api/android/pairing-qr":
             self.send_qr(get_pairing_payload())
