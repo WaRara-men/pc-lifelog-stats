@@ -73,6 +73,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\connect_android_adb.ps1
 
 このスクリプトは、Android端末の `localhost:5600` をPCの `http://127.0.0.1:5601` に転送します。転送後、ダッシュボードはAndroidバケットを自動で読みます。
 
+Export JSONがある場合は、ローカルに取り込めます。
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\import_android_export.ps1 "C:\path\to\aw-buckets-export.json"
+```
+
+取り込んだデータは `local_data/android_events.json` に保存されます。`local_data/` はGit管理外です。
+
 ## Project Status
 
 Personal project.  

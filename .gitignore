@@ -20,6 +20,7 @@ config.local.*
 exports/
 data/
 logs/
+local_data/
 
 # Python/runtime caches
 __pycache__/

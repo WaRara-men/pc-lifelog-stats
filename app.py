@@ -21,6 +21,9 @@ PORT = 8765
 JST = timezone(timedelta(hours=9))
 CACHE_TTL_SECONDS = 45
 SUMMARY_CACHE: dict[int, tuple[float, dict]] = {}
+APP_DIR = Path(__file__).resolve().parent
+LOCAL_DATA_DIR = APP_DIR / "local_data"
+ANDROID_IMPORT_PATH = LOCAL_DATA_DIR / "android_events.json"
 
 
 def iso_z(dt: datetime) -> str:
@@ -80,6 +83,16 @@ def get_android_bridge_buckets() -> list[str]:
     if not isinstance(buckets, dict):
         return []
     return list(buckets.keys())
+
+
+def load_imported_android_events() -> list[dict]:
+    if not ANDROID_IMPORT_PATH.exists():
+        return []
+    try:
+        data = json.loads(ANDROID_IMPORT_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    return data if isinstance(data, list) else []
 
 
 def event_label(event: dict, fallback: str = "unknown") -> str:
@@ -207,6 +220,7 @@ def collect_summary(days: int) -> dict:
     groups = pick_buckets(buckets)
     android_bridge_buckets = get_android_bridge_buckets()
     groups["android_bridge"] = android_bridge_buckets
+    imported_android_events = load_imported_android_events()
     bounds = day_bounds(days)
     today_start, today_end = bounds[-1][0], datetime.now(JST)
     month_bounds = current_month_bounds()
@@ -283,6 +297,22 @@ def collect_summary(days: int) -> dict:
             if today_start <= event_local <= today_end:
                 today_events.append(event)
 
+    for event in imported_android_events:
+        event_start = parse_aw_time(event.get("timestamp"))
+        if not event_start:
+            continue
+        event_local = event_start.astimezone(JST)
+        if event_local < fetch_start or event_local > today_end:
+            continue
+        sec = duration(event)
+        usage_for(event_local)["android"] += sec
+        if selected_start <= event_local < selected_end:
+            label = event_label(event, "android")
+            app_seconds[f"Android: {label}"] = app_seconds.get(f"Android: {label}", 0.0) + sec
+            hourly_seconds[event_local.hour] += sec
+        if today_start <= event_local <= today_end:
+            today_events.append(event)
+
     daily = []
     total_window_seconds = 0.0
     total_afk_active_seconds = 0.0
@@ -318,8 +348,9 @@ def collect_summary(days: int) -> dict:
         "generatedAt": datetime.now(JST).isoformat(timespec="seconds"),
         "days": days,
         "buckets": groups,
-        "hasAndroid": bool(groups["android"] or groups["android_bridge"]),
+        "hasAndroid": bool(groups["android"] or groups["android_bridge"] or imported_android_events),
         "androidBridgeUrl": ANDROID_AW_BASE,
+        "importedAndroidEvents": len(imported_android_events),
         "stats": {
             "todayHours": daily[-1]["totalHours"] if daily else 0,
             "periodTotalHours": round(sum(daily_totals), 2),
