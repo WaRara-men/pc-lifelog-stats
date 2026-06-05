@@ -1,0 +1,38 @@
+# Secrets and local configuration
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+secrets.*
+config.local.*
+
+# ActivityWatch/user data exports
+*.sqlite
+*.sqlite3
+*.db
+*.db3
+*.csv
+*.tsv
+*.jsonl
+*.log
+exports/
+data/
+logs/
+
+# Python/runtime caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
