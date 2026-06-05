@@ -5,7 +5,8 @@ $Description = "Local ActivityWatch dashboard for PC and Android lifelog stats"
 
 gh auth status | Out-Null
 
-if (-not (git remote get-url origin 2>$null)) {
+$Origin = git remote get-url origin 2>$null
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($Origin)) {
     gh repo create $Repo --public --source . --remote origin --description $Description
 }
 
