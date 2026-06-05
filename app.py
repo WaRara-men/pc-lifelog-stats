@@ -15,6 +15,7 @@ from urllib.request import Request, urlopen
 
 
 AW_BASE = "http://localhost:5600/api/0"
+ANDROID_AW_BASE = "http://127.0.0.1:5601/api/0"
 HOST = "127.0.0.1"
 PORT = 8765
 JST = timezone(timedelta(hours=9))
@@ -32,11 +33,11 @@ def get_json(url: str, timeout: int = 20):
         return json.loads(res.read().decode("utf-8"))
 
 
-def aw_get(path: str, params: dict | None = None):
-    url = f"{AW_BASE}{path}"
+def aw_get(path: str, params: dict | None = None, base: str = AW_BASE, timeout: int = 20):
+    url = f"{base}{path}"
     if params:
         url += "?" + urlencode(params)
-    return get_json(url)
+    return get_json(url, timeout=timeout)
 
 
 def classify_bucket(bucket_id: str) -> str:
@@ -59,15 +60,26 @@ def pick_buckets(buckets: dict) -> dict[str, list[str]]:
     return result
 
 
-def fetch_events(bucket_id: str, start: datetime, end: datetime) -> list[dict]:
+def fetch_events(bucket_id: str, start: datetime, end: datetime, base: str = AW_BASE) -> list[dict]:
     try:
         events = aw_get(
             f"/buckets/{bucket_id}/events",
             {"start": iso_z(start), "end": iso_z(end)},
+            base=base,
         )
         return events if isinstance(events, list) else []
     except Exception:
         return []
+
+
+def get_android_bridge_buckets() -> list[str]:
+    try:
+        buckets = aw_get("/buckets", base=ANDROID_AW_BASE, timeout=2)
+    except Exception:
+        return []
+    if not isinstance(buckets, dict):
+        return []
+    return list(buckets.keys())
 
 
 def event_label(event: dict, fallback: str = "unknown") -> str:
@@ -193,6 +205,8 @@ def collect_summary(days: int) -> dict:
 
     buckets = aw_get("/buckets")
     groups = pick_buckets(buckets)
+    android_bridge_buckets = get_android_bridge_buckets()
+    groups["android_bridge"] = android_bridge_buckets
     bounds = day_bounds(days)
     today_start, today_end = bounds[-1][0], datetime.now(JST)
     month_bounds = current_month_bounds()
@@ -254,6 +268,21 @@ def collect_summary(days: int) -> dict:
             if today_start <= event_local <= today_end:
                 today_events.append(event)
 
+    for bucket_id in groups["android_bridge"]:
+        for event in fetch_events(bucket_id, fetch_start, today_end, base=ANDROID_AW_BASE):
+            event_start = parse_aw_time(event.get("timestamp"))
+            if not event_start:
+                continue
+            event_local = event_start.astimezone(JST)
+            sec = duration(event)
+            usage_for(event_local)["android"] += sec
+            if selected_start <= event_local < selected_end:
+                label = event_label(event, "android")
+                app_seconds[f"Android: {label}"] = app_seconds.get(f"Android: {label}", 0.0) + sec
+                hourly_seconds[event_local.hour] += sec
+            if today_start <= event_local <= today_end:
+                today_events.append(event)
+
     daily = []
     total_window_seconds = 0.0
     total_afk_active_seconds = 0.0
@@ -289,7 +318,8 @@ def collect_summary(days: int) -> dict:
         "generatedAt": datetime.now(JST).isoformat(timespec="seconds"),
         "days": days,
         "buckets": groups,
-        "hasAndroid": bool(groups["android"]),
+        "hasAndroid": bool(groups["android"] or groups["android_bridge"]),
+        "androidBridgeUrl": ANDROID_AW_BASE,
         "stats": {
             "todayHours": daily[-1]["totalHours"] if daily else 0,
             "periodTotalHours": round(sum(daily_totals), 2),
