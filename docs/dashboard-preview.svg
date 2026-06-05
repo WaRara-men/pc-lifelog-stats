@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="title desc">
+  <title id="title">PC Lifelog Stats dashboard preview</title>
+  <desc id="desc">A mock preview of the PC Lifelog Stats dashboard with summary cards, insights, a calendar heatmap, and app rankings.</desc>
+  <rect width="1280" height="720" fill="#f4f6f8"/>
+  <rect width="1280" height="88" fill="#ffffff"/>
+  <line x1="0" y1="88" x2="1280" y2="88" stroke="#d9dee7"/>
+  <text x="32" y="38" font-family="Segoe UI, Arial, sans-serif" font-size="25" font-weight="700" fill="#1c2430">PCライフログ統計</text>
+  <text x="32" y="66" font-family="Segoe UI, Arial, sans-serif" font-size="14" fill="#667085">ActivityWatchから読み取り専用で集計</text>
+  <rect x="880" y="27" width="108" height="38" rx="7" fill="#ffffff" stroke="#d9dee7"/>
+  <text x="902" y="51" font-family="Segoe UI, Arial, sans-serif" font-size="14" fill="#1c2430">直近7日</text>
+  <rect x="1000" y="27" width="62" height="38" rx="7" fill="#0f766e"/>
+  <text x="1016" y="51" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="700" fill="#ffffff">更新</text>
+  <text x="1180" y="51" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#667085">更新 09:42</text>
+
+  <rect x="66" y="118" width="1148" height="44" rx="7" fill="#fff7ed"/>
+  <rect x="66" y="118" width="4" height="44" fill="#c2410c"/>
+  <text x="84" y="146" font-family="Segoe UI, Arial, sans-serif" font-size="15" fill="#7c2d12">Android同期後は、PCとスマホの使用時間をこの画面で合算できます。</text>
+
+  <g font-family="Segoe UI, Arial, sans-serif">
+    <g transform="translate(66 184)">
+      <rect width="276" height="126" rx="8" fill="#ffffff" stroke="#d9dee7"/>
+      <text x="18" y="31" font-size="13" fill="#667085">今日の合計</text>
+      <text x="18" y="80" font-size="36" font-weight="800" fill="#1c2430">4.32h</text>
+      <text x="18" y="106" font-size="13" fill="#667085">PC + Android</text>
+    </g>
+    <g transform="translate(358 184)">
+      <rect width="276" height="126" rx="8" fill="#ffffff" stroke="#d9dee7"/>
+      <text x="18" y="31" font-size="13" fill="#667085">期間合計</text>
+      <text x="18" y="80" font-size="36" font-weight="800" fill="#1c2430">28.6h</text>
+      <text x="18" y="106" font-size="13" fill="#667085">7日分</text>
+    </g>
+    <g transform="translate(650 184)">
+      <rect width="276" height="126" rx="8" fill="#ffffff" stroke="#d9dee7"/>
+      <text x="18" y="31" font-size="13" fill="#667085">1日平均</text>
+      <text x="18" y="80" font-size="36" font-weight="800" fill="#1c2430">4.08h</text>
+      <text x="18" y="106" font-size="13" fill="#667085">中央値 3.92h</text>
+    </g>
+    <g transform="translate(942 184)">
+      <rect width="276" height="126" rx="8" fill="#ffffff" stroke="#d9dee7"/>
+      <text x="18" y="31" font-size="13" fill="#667085">最大の日</text>
+      <text x="18" y="80" font-size="36" font-weight="800" fill="#1c2430">6.10h</text>
+      <text x="18" y="106" font-size="13" fill="#667085">使いすぎ検知の基準にできる</text>
+    </g>
+  </g>
+
+  <g font-family="Segoe UI, Arial, sans-serif">
+    <g transform="translate(66 330)">
+      <rect width="376" height="72" rx="8" fill="#ffffff" stroke="#d9dee7"/>
+      <text x="16" y="28" font-size="15" font-weight="700" fill="#1c2430">今月の記録日 18/21</text>
+      <text x="16" y="52" font-size="13" fill="#667085">記録がある日数。習慣の途切れ方が見える。</text>
+    </g>
+    <g transform="translate(452 330)">
+      <rect width="376" height="72" rx="8" fill="#ffffff" stroke="#d9dee7"/>
+      <text x="16" y="28" font-size="15" font-weight="700" fill="#1c2430">ピーク時間 21:00台</text>
+      <text x="16" y="52" font-size="13" fill="#667085">集中/だらだらの山を探す入口。</text>
+    </g>
+    <g transform="translate(838 330)">
+      <rect width="376" height="72" rx="8" fill="#ffffff" stroke="#d9dee7"/>
+      <text x="16" y="28" font-size="15" font-weight="700" fill="#1c2430">主役アプリ Code.exe</text>
+      <text x="16" y="52" font-size="13" fill="#667085">期間内でいちばん長く前面にいたアプリ。</text>
+    </g>
+  </g>
+
+  <g font-family="Segoe UI, Arial, sans-serif" transform="translate(66 424)">
+    <rect width="650" height="244" rx="8" fill="#ffffff" stroke="#d9dee7"/>
+    <text x="18" y="36" font-size="18" font-weight="700" fill="#1c2430">月間カレンダー</text>
+    <text x="500" y="36" font-size="12" fill="#667085">色が濃いほど使用時間が長い</text>
+    <text x="18" y="66" font-size="13" fill="#667085">2026-06　最大 6.10h　緑: PC / 紫: Android</text>
+    <g font-size="12" fill="#667085" text-anchor="middle">
+      <text x="54" y="96">月</text><text x="140" y="96">火</text><text x="226" y="96">水</text><text x="312" y="96">木</text><text x="398" y="96">金</text><text x="484" y="96">土</text><text x="570" y="96">日</text>
+    </g>
+    <g transform="translate(18 108)" font-size="13">
+      <rect x="0" y="0" width="76" height="56" rx="7" fill="#e8f3f0" stroke="#d9dee7"/><text x="8" y="18" fill="#667085">1</text><text x="8" y="42" font-weight="700" fill="#1c2430">2.1h</text>
+      <rect x="86" y="0" width="76" height="56" rx="7" fill="#d6ece6" stroke="#d9dee7"/><text x="94" y="18" fill="#667085">2</text><text x="94" y="42" font-weight="700" fill="#1c2430">3.4h</text>
+      <rect x="172" y="0" width="76" height="56" rx="7" fill="#c7e3dc" stroke="#d9dee7"/><text x="180" y="18" fill="#667085">3</text><text x="180" y="42" font-weight="700" fill="#1c2430">4.2h</text>
+      <rect x="258" y="0" width="76" height="56" rx="7" fill="#efeafa" stroke="#d9dee7"/><text x="266" y="18" fill="#667085">4</text><text x="266" y="42" font-weight="700" fill="#1c2430">1.5h</text>
+      <rect x="344" y="0" width="76" height="56" rx="7" fill="#86c7bd" stroke="#d9dee7"/><text x="352" y="18" fill="#667085">5</text><text x="352" y="42" font-weight="700" fill="#1c2430">6.1h</text>
+      <rect x="430" y="0" width="76" height="56" rx="7" fill="#f8fafc" stroke="#d9dee7"/><text x="438" y="18" fill="#667085">6</text><text x="438" y="42" font-weight="700" fill="#a0a7b2">0.0h</text>
+      <rect x="516" y="0" width="76" height="56" rx="7" fill="#e2f0ec" stroke="#d9dee7"/><text x="524" y="18" fill="#667085">7</text><text x="524" y="42" font-weight="700" fill="#1c2430">2.8h</text>
+      <rect x="0" y="66" width="76" height="56" rx="7" fill="#d9e7f4" stroke="#d9dee7"/><text x="8" y="84" fill="#667085">8</text><text x="8" y="108" font-weight="700" fill="#1c2430">3.7h</text>
+      <rect x="86" y="66" width="76" height="56" rx="7" fill="#bde0d7" stroke="#d9dee7"/><text x="94" y="84" fill="#667085">9</text><text x="94" y="108" font-weight="700" fill="#1c2430">4.9h</text>
+      <rect x="172" y="66" width="76" height="56" rx="7" fill="#f8fafc" stroke="#d9dee7"/><text x="180" y="84" fill="#667085">10</text><text x="180" y="108" font-weight="700" fill="#a0a7b2">0.0h</text>
+      <rect x="258" y="66" width="76" height="56" rx="7" fill="#e0eee9" stroke="#d9dee7"/><text x="266" y="84" fill="#667085">11</text><text x="266" y="108" font-weight="700" fill="#1c2430">2.6h</text>
+      <rect x="344" y="66" width="76" height="56" rx="7" fill="#d1e8e1" stroke="#d9dee7"/><text x="352" y="84" fill="#667085">12</text><text x="352" y="108" font-weight="700" fill="#1c2430">3.8h</text>
+    </g>
+  </g>
+
+  <g font-family="Segoe UI, Arial, sans-serif" transform="translate(736 424)">
+    <rect width="478" height="244" rx="8" fill="#ffffff" stroke="#d9dee7"/>
+    <text x="18" y="36" font-size="18" font-weight="700" fill="#1c2430">アプリ別</text>
+    <g font-size="14" fill="#1c2430">
+      <text x="18" y="72">Code.exe</text><rect x="18" y="82" width="360" height="9" rx="5" fill="#e8edf2"/><rect x="18" y="82" width="360" height="9" rx="5" fill="#0f766e"/><text x="420" y="91" text-anchor="end" fill="#667085">8.4h</text>
+      <text x="18" y="116">msedge.exe</text><rect x="18" y="126" width="360" height="9" rx="5" fill="#e8edf2"/><rect x="18" y="126" width="238" height="9" rx="5" fill="#0f766e"/><text x="420" y="135" text-anchor="end" fill="#667085">5.5h</text>
+      <text x="18" y="160">Android: Browser</text><rect x="18" y="170" width="360" height="9" rx="5" fill="#e8edf2"/><rect x="18" y="170" width="184" height="9" rx="5" fill="#7c3aed"/><text x="420" y="179" text-anchor="end" fill="#667085">4.3h</text>
+      <text x="18" y="204">Spotify.exe</text><rect x="18" y="214" width="360" height="9" rx="5" fill="#e8edf2"/><rect x="18" y="214" width="94" height="9" rx="5" fill="#0f766e"/><text x="420" y="223" text-anchor="end" fill="#667085">2.2h</text>
+    </g>
+  </g>
+</svg>

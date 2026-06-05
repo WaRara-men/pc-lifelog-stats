@@ -1,41 +1,79 @@
 # PC Lifelog Stats
 
-ActivityWatchのローカルAPIから、PCとAndroidの使用ログを読み取り専用で集計するWindows向けダッシュボードです。
+自分がPCをどれだけ見ているのかを、ActivityWatchのログから見える化するローカルダッシュボードです。
 
-個人のActivityWatchログや`.env`は含めません。このリポジトリはアプリ本体だけを公開するためのものです。
+今日の使用時間、アプリ別ランキング、時間帯ヒート、月間カレンダーをまとめて表示します。Android版ActivityWatchのログをPCに同期すれば、スマホ利用も同じ画面で合算できます。
 
-## Features
+![Dashboard preview](https://raw.githubusercontent.com/WaRara-men/pc-lifelog-stats/main/docs/dashboard-preview.svg)
 
-- 今日の合計使用時間
+## What It Shows
+
+- 今日どれだけPC/Androidを使ったか
 - 直近1日、7日、14日、30日の合計・平均・中央値・最大
-- 月間カレンダーのヒート表示
-- アプリ別使用時間
-- ウィンドウタイトル別使用時間
-- 日別推移
-- 時間帯ヒート
-- 期間インサイト
-- 最近の記録
-- Androidバケット同期後の自動合算
+- 使用時間で色が濃くなる月間カレンダー
+- アプリ別の使用時間ランキング
+- ウィンドウタイトル別の使用時間ランキング
+- 何時台によく使っているかが分かる時間帯ヒート
+- 最近のアクティビティ一覧
+- Androidログ同期後の自動合算
 
-## 起動
+## Why
 
-`start_dashboard.bat` をダブルクリックします。
+ActivityWatchは強力ですが、「とりあえず今日どれだけ見たか」「今月の濃い日がどこか」を一目で見るには少し距離があります。
 
-ブラウザが開かない場合は、手動で以下を開いてください。
+このアプリは、細かいログを読むためではなく、自分の生活リズムをぱっと掴むための画面です。使いすぎを責めるより、まず自分の時間の形を見えるようにすることを目指しています。
 
-```text
-http://127.0.0.1:8765
+## Requirements
+
+- Windows 11
+- Python 3.12+
+- ActivityWatch desktop app
+- ActivityWatch local API: `http://localhost:5600/api/0`
+
+## Quick Start
+
+1. ActivityWatchを起動します。
+2. このリポジトリをダウンロードまたはcloneします。
+3. `start_dashboard.bat` をダブルクリックします。
+4. ブラウザで `http://127.0.0.1:8765` が開きます。
+
+```powershell
+git clone https://github.com/WaRara-men/pc-lifelog-stats.git
+cd pc-lifelog-stats
+.\start_dashboard.bat
 ```
 
-## Windows検索から起動
+## Start From Windows Search
 
-`install_start_menu_shortcut.ps1` を実行すると、スタートメニューに `PC Lifelog Stats` が登録されます。
+デスクトップにショートカットを増やしたくない場合は、スタートメニューにだけ登録できます。
 
-登録後は、Windowsキーを押して `PC` または `lifelog` と検索すれば起動できます。デスクトップには何も増やしません。
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install_start_menu_shortcut.ps1
+```
 
-## 注意
+登録後は、Windowsキーを押して `lifelog` または `PC` と検索すると **PC Lifelog Stats** が出ます。
 
-- ActivityWatchが起動していて、`http://localhost:5600/api/0` にアクセスできる必要があります。
-- Android側のバケットがPCに同期されると、自動で `Android:` として合算されます。
-- データは変更しません。ActivityWatch APIを読み取るだけです。
-- GitHubにはActivityWatchの実ログ、CSV、JSONL、DB、`.env`を載せないでください。
+## Data Safety
+
+このアプリはActivityWatchのローカルAPIを読み取るだけです。ActivityWatchのデータを書き換えません。
+
+このリポジトリには、個人のActivityWatchログ、CSV、JSONL、DB、`.env`、秘密鍵、トークンを含めない方針です。`.gitignore` でもそれらを除外しています。
+
+## Android Logs
+
+Android版ActivityWatchのバケットがPC側に同期されると、画面内で自動的に `Android:` として集計されます。
+
+まだ同期されていない場合は、ダッシュボード上に「AndroidのバケットはまだPC側に見えていません」と表示されます。
+
+## Project Status
+
+Personal project.  
+今はローカル利用を前提にした軽量版です。
+
+今後の候補:
+
+- カテゴリ分類
+- 週/月レポート
+- CSVエクスポート
+- より細かいAndroidアプリ分析
+- 使いすぎアラート
