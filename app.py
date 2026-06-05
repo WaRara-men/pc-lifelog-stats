@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import json
+import secrets
+import socket
 import statistics
+import subprocess
 import sys
 import threading
 import time
 import webbrowser
+from io import BytesIO
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -18,12 +22,17 @@ AW_BASE = "http://localhost:5600/api/0"
 ANDROID_AW_BASE = "http://127.0.0.1:5601/api/0"
 HOST = "127.0.0.1"
 PORT = 8765
+RECEIVER_HOST = "0.0.0.0"
+RECEIVER_PORT = 8766
 JST = timezone(timedelta(hours=9))
 CACHE_TTL_SECONDS = 45
 SUMMARY_CACHE: dict[int, tuple[float, dict]] = {}
 APP_DIR = Path(__file__).resolve().parent
 LOCAL_DATA_DIR = APP_DIR / "local_data"
 ANDROID_IMPORT_PATH = LOCAL_DATA_DIR / "android_events.json"
+ANDROID_SENDER_PATH = LOCAL_DATA_DIR / "android_sender_events.json"
+SENDER_TOKEN_PATH = LOCAL_DATA_DIR / "sender_token.txt"
+SENDER_STATUS_PATH = LOCAL_DATA_DIR / "sender_status.json"
 IMPORT_SOURCES_PATH = LOCAL_DATA_DIR / "import_sources.json"
 IMPORT_STATE_PATH = LOCAL_DATA_DIR / "import_state.json"
 
@@ -87,14 +96,176 @@ def get_android_bridge_buckets() -> list[str]:
     return list(buckets.keys())
 
 
-def load_imported_android_events() -> list[dict]:
-    if not ANDROID_IMPORT_PATH.exists():
-        return []
+def read_json_file(path: Path, fallback):
+    if not path.exists():
+        return fallback
     try:
-        data = json.loads(ANDROID_IMPORT_PATH.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
-        return []
+        return fallback
+
+
+def load_imported_android_events() -> list[dict]:
+    data = read_json_file(ANDROID_IMPORT_PATH, [])
     return data if isinstance(data, list) else []
+
+
+def load_sender_android_events() -> list[dict]:
+    data = read_json_file(ANDROID_SENDER_PATH, [])
+    return data if isinstance(data, list) else []
+
+
+def get_sender_token() -> str:
+    LOCAL_DATA_DIR.mkdir(exist_ok=True)
+    if SENDER_TOKEN_PATH.exists():
+        token = SENDER_TOKEN_PATH.read_text(encoding="utf-8").strip()
+        if token:
+            return token
+    token = secrets.token_urlsafe(32)
+    SENDER_TOKEN_PATH.write_text(token, encoding="utf-8")
+    return token
+
+
+def is_private_ipv4(value: str) -> bool:
+    parts = value.split(".")
+    if len(parts) != 4:
+        return False
+    try:
+        nums = [int(part) for part in parts]
+    except ValueError:
+        return False
+    if nums[0] == 10:
+        return True
+    if nums[0] == 172 and 16 <= nums[1] <= 31:
+        return True
+    if nums[0] == 192 and nums[1] == 168:
+        return True
+    return False
+
+
+def get_pairing_host() -> str:
+    override = LOCAL_DATA_DIR / "pairing_host.txt"
+    if override.exists():
+        value = override.read_text(encoding="utf-8").strip()
+        if value:
+            return value
+    candidates = []
+    try:
+        ipconfig = subprocess.check_output(["ipconfig"], text=True, encoding="utf-8", errors="ignore")
+        for line in ipconfig.splitlines():
+            if "IPv4" not in line:
+                continue
+            ip = line.split(":")[-1].strip()
+            if ip and not ip.startswith("127."):
+                candidates.append(ip)
+    except Exception:
+        pass
+    try:
+        hostname = socket.gethostname()
+        for info in socket.getaddrinfo(hostname, None, socket.AF_INET):
+            ip = info[4][0]
+            if not ip.startswith("127."):
+                candidates.append(ip)
+    except Exception:
+        pass
+    for ip in candidates:
+        if is_private_ipv4(ip):
+            return ip
+    if candidates:
+        return candidates[0]
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.connect(("8.8.8.8", 80))
+        return sock.getsockname()[0]
+    except Exception:
+        return "127.0.0.1"
+    finally:
+        try:
+            sock.close()
+        except Exception:
+            pass
+
+
+def get_pairing_payload() -> dict:
+    host = get_pairing_host()
+    server = f"http://{host}:{RECEIVER_PORT}"
+    return {
+        "name": "PC Lifelog Stats",
+        "server": server,
+        "token": get_sender_token(),
+        "version": 1,
+        "once": True,
+    }
+
+
+def normalize_sender_event(event: dict) -> dict | None:
+    timestamp = event.get("timestamp")
+    if not timestamp:
+        return None
+    try:
+        duration_value = max(0.0, float(event.get("duration") or 0.0))
+    except (TypeError, ValueError):
+        duration_value = 0.0
+    data = event.get("data") if isinstance(event.get("data"), dict) else {}
+    app = data.get("app") or data.get("appLabel") or data.get("package") or "Android"
+    package = data.get("package") or data.get("packageName") or ""
+    classname = data.get("classname") or data.get("className") or ""
+    return {
+        "timestamp": timestamp,
+        "duration": duration_value,
+        "data": {
+            "app": app,
+            "package": package,
+            "classname": classname,
+            "source": "android-sender",
+        },
+    }
+
+
+def event_key(event: dict):
+    data = event.get("data") or {}
+    return (
+        event.get("timestamp"),
+        round(float(event.get("duration") or 0.0), 3),
+        data.get("app"),
+        data.get("package"),
+        data.get("classname"),
+    )
+
+
+def save_sender_events(incoming: list[dict]) -> dict:
+    existing = load_sender_android_events()
+    merged = {event_key(event): event for event in existing if isinstance(event, dict)}
+    accepted = 0
+    for event in incoming:
+        normalized = normalize_sender_event(event)
+        if not normalized:
+            continue
+        key = event_key(normalized)
+        if key not in merged:
+            accepted += 1
+        merged[key] = normalized
+    events = sorted(merged.values(), key=lambda item: item.get("timestamp") or "")
+    LOCAL_DATA_DIR.mkdir(exist_ok=True)
+    ANDROID_SENDER_PATH.write_text(json.dumps(events, ensure_ascii=False, indent=2), encoding="utf-8")
+    status = {
+        "last_received_at": datetime.now(JST).isoformat(timespec="seconds"),
+        "total_events": len(events),
+        "accepted_events": accepted,
+    }
+    SENDER_STATUS_PATH.write_text(json.dumps(status, ensure_ascii=False, indent=2), encoding="utf-8")
+    SUMMARY_CACHE.clear()
+    return status
+
+
+def get_sender_status() -> dict:
+    status = read_json_file(SENDER_STATUS_PATH, {})
+    if not isinstance(status, dict):
+        status = {}
+    status["configured"] = SENDER_TOKEN_PATH.exists()
+    status["events"] = len(load_sender_android_events())
+    status["receiver"] = f"http://{get_pairing_host()}:{RECEIVER_PORT}"
+    return status
 
 
 def refresh_android_imports_if_needed() -> dict:
@@ -274,6 +445,7 @@ def collect_summary(days: int) -> dict:
     android_bridge_buckets = get_android_bridge_buckets()
     groups["android_bridge"] = android_bridge_buckets
     imported_android_events = load_imported_android_events()
+    sender_android_events = load_sender_android_events()
     bounds = day_bounds(days)
     today_start, today_end = bounds[-1][0], datetime.now(JST)
     month_bounds = current_month_bounds()
@@ -366,6 +538,22 @@ def collect_summary(days: int) -> dict:
         if today_start <= event_local <= today_end:
             today_events.append(event)
 
+    for event in sender_android_events:
+        event_start = parse_aw_time(event.get("timestamp"))
+        if not event_start:
+            continue
+        event_local = event_start.astimezone(JST)
+        if event_local < fetch_start or event_local > today_end:
+            continue
+        sec = duration(event)
+        usage_for(event_local)["android"] += sec
+        if selected_start <= event_local < selected_end:
+            label = event_label(event, "android")
+            app_seconds[f"Android: {label}"] = app_seconds.get(f"Android: {label}", 0.0) + sec
+            hourly_seconds[event_local.hour] += sec
+        if today_start <= event_local <= today_end:
+            today_events.append(event)
+
     daily = []
     total_window_seconds = 0.0
     total_afk_active_seconds = 0.0
@@ -401,9 +589,11 @@ def collect_summary(days: int) -> dict:
         "generatedAt": datetime.now(JST).isoformat(timespec="seconds"),
         "days": days,
         "buckets": groups,
-        "hasAndroid": bool(groups["android"] or groups["android_bridge"] or imported_android_events),
+        "hasAndroid": bool(groups["android"] or groups["android_bridge"] or imported_android_events or sender_android_events),
         "androidBridgeUrl": ANDROID_AW_BASE,
         "importedAndroidEvents": len(imported_android_events),
+        "senderAndroidEvents": len(sender_android_events),
+        "senderStatus": get_sender_status(),
         "androidImportStatus": import_status,
         "stats": {
             "todayHours": daily[-1]["totalHours"] if daily else 0,
@@ -543,6 +733,12 @@ INDEX_HTML = r"""<!doctype html>
     .insight { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 12px; box-shadow: var(--shadow); min-height: 82px; }
     .insight strong { display: block; font-size: 15px; margin-bottom: 6px; }
     .insight span { color: var(--muted); font-size: 13px; }
+    .pairing { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 16px; align-items: center; }
+    .pairing-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+    .qr-box { display: none; justify-self: end; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+    .qr-box.visible { display: block; }
+    .qr-box img { display: block; width: 190px; height: 190px; }
+    .mono { font-family: Consolas, "SFMono-Regular", monospace; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
     .bars { display: flex; flex-direction: column; gap: 10px; }
     .bar-row { display: grid; grid-template-columns: minmax(120px, 1fr) 80px; gap: 10px; align-items: center; }
     .bar-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
@@ -568,6 +764,8 @@ INDEX_HTML = r"""<!doctype html>
       .grid { grid-template-columns: repeat(2, 1fr); }
       .layout { grid-template-columns: 1fr; }
       .insights { grid-template-columns: 1fr; }
+      .pairing { grid-template-columns: 1fr; }
+      .qr-box { justify-self: start; }
     }
     @media (max-width: 520px) {
       main { padding: 14px; }
@@ -603,6 +801,25 @@ INDEX_HTML = r"""<!doctype html>
       <div class="card"><div class="label">期間合計</div><div class="value" id="period">--</div><div class="sub" id="periodSub">--</div></div>
       <div class="card"><div class="label">1日平均</div><div class="value" id="average">--</div><div class="sub">中央値 <span id="median">--</span></div></div>
       <div class="card"><div class="label">最大の日</div><div class="value" id="max">--</div><div class="sub">使いすぎ検知の基準にできる</div></div>
+    </section>
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Android連携</h2>
+        <div class="hint">QRは初回だけ。読み込んだらスマホ側に保存されます。</div>
+      </div>
+      <div class="pairing">
+        <div>
+          <div id="senderSummary" class="sub">接続状態を確認中...</div>
+          <div id="senderUrl" class="mono"></div>
+          <div class="pairing-actions">
+            <button id="showQr">接続QRを表示</button>
+            <button id="hideQr">QRを隠す</button>
+          </div>
+        </div>
+        <div class="qr-box" id="qrBox">
+          <img id="qrImage" alt="Android pairing QR">
+        </div>
+      </div>
     </section>
     <section class="insights" id="insights"></section>
     <section class="layout">
@@ -671,6 +888,7 @@ INDEX_HTML = r"""<!doctype html>
       document.getElementById('average').textContent = fmtHours(data.stats.averageHours);
       document.getElementById('median').textContent = fmtHours(data.stats.medianHours);
       document.getElementById('max').textContent = fmtHours(data.stats.maxHours);
+      renderSender(data);
       renderInsights(data);
       renderCalendar(data.calendar);
 
@@ -691,6 +909,14 @@ INDEX_HTML = r"""<!doctype html>
       document.getElementById('recent').innerHTML = data.recent.length ? data.recent.map(r =>
         `<tr><td>${esc(r.time)}</td><td>${esc(r.name)}</td><td>${esc(r.title)}</td><td>${fmtMinutes(r.minutes)}</td></tr>`
       ).join('') : '<tr><td colspan="4" class="empty">今日の記録がまだ少ないです</td></tr>';
+    }
+
+    function renderSender(data) {
+      const status = data.senderStatus || {};
+      const last = status.last_received_at ? `最終受信 ${status.last_received_at.replace('T', ' ')}` : 'まだSenderからの受信なし';
+      const events = Number(data.senderAndroidEvents || 0);
+      document.getElementById('senderSummary').textContent = `Senderイベント ${events}件 / ${last}`;
+      document.getElementById('senderUrl').textContent = status.receiver ? `受信先: ${status.receiver}` : '';
     }
 
     function renderInsights(data) {
@@ -739,6 +965,13 @@ INDEX_HTML = r"""<!doctype html>
 
     document.getElementById('reload').addEventListener('click', load);
     document.getElementById('days').addEventListener('change', load);
+    document.getElementById('showQr').addEventListener('click', () => {
+      document.getElementById('qrImage').src = `/api/android/pairing-qr?t=${Date.now()}`;
+      document.getElementById('qrBox').classList.add('visible');
+    });
+    document.getElementById('hideQr').addEventListener('click', () => {
+      document.getElementById('qrBox').classList.remove('visible');
+    });
     load();
     setInterval(load, 60000);
   </script>
@@ -752,6 +985,15 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path == "/":
             self.send_text(INDEX_HTML, "text/html; charset=utf-8")
+            return
+        if parsed.path == "/api/android/pairing":
+            self.send_json({"ok": True, "pairing": get_pairing_payload()})
+            return
+        if parsed.path == "/api/android/status":
+            self.send_json({"ok": True, "status": get_sender_status()})
+            return
+        if parsed.path == "/api/android/pairing-qr":
+            self.send_qr(get_pairing_payload())
             return
         if parsed.path == "/api/summary":
             qs = parse_qs(parsed.query)
@@ -769,6 +1011,35 @@ class Handler(BaseHTTPRequestHandler):
             return
         self.send_json({"ok": False, "message": "not found"}, status=404)
 
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        if parsed.path != "/api/android/events":
+            self.send_json({"ok": False, "message": "not found"}, status=404)
+            return
+        qs = parse_qs(parsed.query)
+        token = (qs.get("token") or [""])[0] or self.headers.get("X-PC-Lifelog-Token", "")
+        if not secrets.compare_digest(token, get_sender_token()):
+            self.send_json({"ok": False, "message": "unauthorized"}, status=401)
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            length = 0
+        if length <= 0 or length > 8_000_000:
+            self.send_json({"ok": False, "message": "invalid body"}, status=400)
+            return
+        try:
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+        except Exception:
+            self.send_json({"ok": False, "message": "invalid json"}, status=400)
+            return
+        events = payload.get("events") if isinstance(payload, dict) else payload
+        if not isinstance(events, list):
+            self.send_json({"ok": False, "message": "events must be a list"}, status=400)
+            return
+        status = save_sender_events([event for event in events if isinstance(event, dict)])
+        self.send_json({"ok": True, "status": status})
+
     def log_message(self, fmt, *args):
         return
 
@@ -783,6 +1054,24 @@ class Handler(BaseHTTPRequestHandler):
     def send_json(self, data: dict, status: int = 200):
         self.send_text(json.dumps(data, ensure_ascii=False), "application/json; charset=utf-8", status)
 
+    def send_bytes(self, body: bytes, content_type: str, status: int = 200):
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def send_qr(self, payload: dict):
+        try:
+            import qrcode
+
+            image = qrcode.make(json.dumps(payload, ensure_ascii=False))
+            buffer = BytesIO()
+            image.save(buffer, format="PNG")
+            self.send_bytes(buffer.getvalue(), "image/png")
+        except Exception as exc:
+            self.send_json({"ok": False, "message": f"QR generation failed: {exc}"}, status=500)
+
 
 def open_browser_later(url: str):
     time.sleep(0.8)
@@ -791,14 +1080,19 @@ def open_browser_later(url: str):
 
 def main():
     server = ThreadingHTTPServer((HOST, PORT), Handler)
+    receiver = ThreadingHTTPServer((RECEIVER_HOST, RECEIVER_PORT), Handler)
     url = f"http://{HOST}:{PORT}"
     print(f"PCライフログ統計: {url}")
+    print(f"Android Sender receiver: http://{get_pairing_host()}:{RECEIVER_PORT}")
+    threading.Thread(target=receiver.serve_forever, daemon=True).start()
     if "--no-open" not in sys.argv:
         threading.Thread(target=open_browser_later, args=(url,), daemon=True).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print("\n終了します")
+    finally:
+        receiver.shutdown()
 
 
 if __name__ == "__main__":

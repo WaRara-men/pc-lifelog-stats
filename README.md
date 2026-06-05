@@ -53,6 +53,30 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install_start_menu_shortcu
 
 登録後は、Windowsキーを押して `lifelog` または `PC` と検索すると **PC Lifelog Stats** が出ます。
 
+## Android Sender Pairing
+
+Android companion appを使う場合は、PC側にQRを表示して初回だけ読み取ります。読み取り後、スマホ側に接続先とtokenが保存されるため、次回以降QRは不要です。
+
+PC側の受信ポートをLAN内だけ許可します。
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\enable_android_sender_firewall.ps1
+```
+
+ダッシュボードを開き、`Android連携` の `接続QRを表示` を押します。QRには以下が入ります。
+
+```json
+{
+  "name": "PC Lifelog Stats",
+  "server": "http://<PCのLAN IP>:8766",
+  "token": "<local token>",
+  "version": 1,
+  "once": true
+}
+```
+
+Android側はこの情報を保存し、以後は `POST /api/android/events` にtoken付きで送信します。
+
 ## Data Safety
 
 このアプリはActivityWatchのローカルAPIを読み取るだけです。ActivityWatchのデータを書き換えません。
