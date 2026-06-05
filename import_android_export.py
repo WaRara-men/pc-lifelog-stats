@@ -69,21 +69,43 @@ def extract_events(export: dict) -> list[dict]:
     return normalized
 
 
-def main() -> int:
-    if len(sys.argv) != 2:
-        print("Usage: python import_android_export.py <aw-buckets-export.json>")
-        return 2
-    source = Path(sys.argv[1]).expanduser().resolve()
-    if not source.exists():
-        print(f"File not found: {source}")
-        return 1
+def import_sources(paths: list[Path]) -> tuple[int, float]:
+    all_events = []
+    for path in paths:
+        export = load_export(path)
+        all_events.extend(extract_events(export))
 
-    export = load_export(source)
-    events = extract_events(export)
+    deduped = {}
+    for event in all_events:
+        key = (
+            event.get("timestamp"),
+            event.get("duration"),
+            (event.get("data") or {}).get("app"),
+            (event.get("data") or {}).get("package"),
+            (event.get("data") or {}).get("classname"),
+        )
+        deduped[key] = event
+
+    events = sorted(deduped.values(), key=lambda event: event["timestamp"])
     LOCAL_DATA_DIR.mkdir(exist_ok=True)
     OUTPUT_PATH.write_text(json.dumps(events, ensure_ascii=False, indent=2), encoding="utf-8")
     total_seconds = sum(float(event.get("duration") or 0.0) for event in events)
-    print(f"Imported Android events: {len(events)}")
+    return len(events), total_seconds
+
+
+def main() -> int:
+    if len(sys.argv) < 2:
+        print("Usage: python import_android_export.py <aw-buckets-export.json> [more-export.json ...]")
+        return 2
+
+    sources = [Path(arg).expanduser().resolve() for arg in sys.argv[1:]]
+    for source in sources:
+        if not source.exists():
+            print(f"File not found: {source}")
+            return 1
+
+    count, total_seconds = import_sources(sources)
+    print(f"Imported Android events: {count}")
     print(f"Total duration: {total_seconds / 3600:.2f}h")
     print(f"Saved local data: {OUTPUT_PATH}")
     return 0

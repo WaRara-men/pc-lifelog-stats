@@ -24,6 +24,8 @@ SUMMARY_CACHE: dict[int, tuple[float, dict]] = {}
 APP_DIR = Path(__file__).resolve().parent
 LOCAL_DATA_DIR = APP_DIR / "local_data"
 ANDROID_IMPORT_PATH = LOCAL_DATA_DIR / "android_events.json"
+IMPORT_SOURCES_PATH = LOCAL_DATA_DIR / "import_sources.json"
+IMPORT_STATE_PATH = LOCAL_DATA_DIR / "import_state.json"
 
 
 def iso_z(dt: datetime) -> str:
@@ -93,6 +95,56 @@ def load_imported_android_events() -> list[dict]:
     except Exception:
         return []
     return data if isinstance(data, list) else []
+
+
+def refresh_android_imports_if_needed() -> dict:
+    if not IMPORT_SOURCES_PATH.exists():
+        return {"enabled": False, "updated": False, "sources": 0}
+    try:
+        config = json.loads(IMPORT_SOURCES_PATH.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return {"enabled": False, "updated": False, "sources": 0}
+
+    source_paths = [Path(path) for path in config.get("paths", []) if isinstance(path, str)]
+    existing = [path for path in source_paths if path.exists()]
+    if not existing:
+        return {"enabled": True, "updated": False, "sources": 0}
+
+    signature = {
+        str(path): {"mtime": path.stat().st_mtime, "size": path.stat().st_size}
+        for path in existing
+    }
+    previous = {}
+    if IMPORT_STATE_PATH.exists():
+        try:
+            previous = json.loads(IMPORT_STATE_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            previous = {}
+    if previous.get("signature") == signature and ANDROID_IMPORT_PATH.exists():
+        return {"enabled": True, "updated": False, "sources": len(existing)}
+
+    try:
+        from import_android_export import import_sources
+
+        count, total_seconds = import_sources(existing)
+    except Exception:
+        return {"enabled": True, "updated": False, "sources": len(existing), "error": True}
+
+    IMPORT_STATE_PATH.write_text(
+        json.dumps(
+            {
+                "signature": signature,
+                "last_imported_at": datetime.now(JST).isoformat(timespec="seconds"),
+                "events": count,
+                "hours": round(total_seconds / 3600, 2),
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    SUMMARY_CACHE.clear()
+    return {"enabled": True, "updated": True, "sources": len(existing), "events": count}
 
 
 def event_label(event: dict, fallback: str = "unknown") -> str:
@@ -210,6 +262,7 @@ def build_calendar(usage_by_date: dict[str, dict]) -> dict:
 
 
 def collect_summary(days: int) -> dict:
+    import_status = refresh_android_imports_if_needed()
     cached = SUMMARY_CACHE.get(days)
     if cached and time.time() - cached[0] < CACHE_TTL_SECONDS:
         data = dict(cached[1])
@@ -351,6 +404,7 @@ def collect_summary(days: int) -> dict:
         "hasAndroid": bool(groups["android"] or groups["android_bridge"] or imported_android_events),
         "androidBridgeUrl": ANDROID_AW_BASE,
         "importedAndroidEvents": len(imported_android_events),
+        "androidImportStatus": import_status,
         "stats": {
             "todayHours": daily[-1]["totalHours"] if daily else 0,
             "periodTotalHours": round(sum(daily_totals), 2),

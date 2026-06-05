@@ -81,6 +81,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\import_android_export.ps1 
 
 取り込んだデータは `local_data/android_events.json` に保存されます。`local_data/` はGit管理外です。
 
+同じExportファイルを継続して使う場合は、自動取り込み対象として登録できます。
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\watch_android_export.ps1 "C:\path\to\aw-buckets-export.json"
+```
+
+登録後は、そのJSONの更新日時やサイズが変わると、ダッシュボードの更新時に自動で再取り込みされます。
+
 ## Project Status
 
 Personal project.  
