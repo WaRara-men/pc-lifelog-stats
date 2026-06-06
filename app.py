@@ -433,6 +433,27 @@ def duration(event: dict) -> float:
         return 0.0
 
 
+def event_interval(event: dict) -> tuple[datetime, datetime] | None:
+    start = parse_aw_time(event.get("timestamp"))
+    seconds = duration(event)
+    if not start or seconds <= 0:
+        return None
+    start_local = start.astimezone(JST)
+    return start_local, start_local + timedelta(seconds=seconds)
+
+
+def clipped_interval(start: datetime, end: datetime, window_start: datetime, window_end: datetime) -> tuple[datetime, datetime] | None:
+    clipped_start = max(start, window_start)
+    clipped_end = min(end, window_end)
+    if clipped_end <= clipped_start:
+        return None
+    return clipped_start, clipped_end
+
+
+def interval_seconds(start: datetime, end: datetime) -> float:
+    return max(0.0, (end - start).total_seconds())
+
+
 def round_minutes(seconds: float) -> float:
     return round(seconds / 60, 1)
 
@@ -621,6 +642,24 @@ def empty_usage() -> dict:
     return {"window": 0.0, "active": 0.0, "android": 0.0}
 
 
+def split_by_day(start: datetime, end: datetime):
+    cursor = start
+    while cursor < end:
+        next_day = datetime(cursor.year, cursor.month, cursor.day, tzinfo=JST) + timedelta(days=1)
+        chunk_end = min(end, next_day)
+        yield cursor, chunk_end
+        cursor = chunk_end
+
+
+def split_by_hour(start: datetime, end: datetime):
+    cursor = start
+    while cursor < end:
+        next_hour = cursor.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        chunk_end = min(end, next_hour)
+        yield cursor, chunk_end
+        cursor = chunk_end
+
+
 def build_calendar(usage_by_date: dict[str, dict]) -> dict:
     bounds = current_month_bounds()
     month_days = []
@@ -683,99 +722,82 @@ def collect_summary(days: int) -> dict:
             usage_by_date[key] = empty_usage()
         return usage_by_date[key]
 
+    def add_usage_span(start: datetime, end: datetime, key: str):
+        for chunk_start, chunk_end in split_by_day(start, end):
+            usage_for(chunk_start)[key] += interval_seconds(chunk_start, chunk_end)
+
+    def add_hourly_span(start: datetime, end: datetime):
+        for chunk_start, chunk_end in split_by_hour(start, end):
+            hourly_seconds[chunk_start.hour] += interval_seconds(chunk_start, chunk_end)
+
+    def record_event(event: dict, usage_key: str, source: str, label_prefix: str = "", include_title: bool = False):
+        interval = event_interval(event)
+        if not interval:
+            return
+        event_start, event_end = interval
+        visible = clipped_interval(event_start, event_end, fetch_start, today_end)
+        if not visible:
+            return
+        visible_start, visible_end = visible
+        visible_seconds = interval_seconds(visible_start, visible_end)
+        add_usage_span(visible_start, visible_end, usage_key)
+
+        selected = clipped_interval(event_start, event_end, selected_start, selected_end)
+        if selected:
+            selected_start_clip, selected_end_clip = selected
+            selected_seconds = interval_seconds(selected_start_clip, selected_end_clip)
+            label = event_label(event, source)
+            app_label = f"{label_prefix}{label}" if label_prefix else label
+            app_seconds[app_label] = app_seconds.get(app_label, 0.0) + selected_seconds
+            if include_title:
+                title = event_title(event)
+                if title:
+                    title_seconds[title] = title_seconds.get(title, 0.0) + selected_seconds
+            add_hourly_span(selected_start_clip, selected_end_clip)
+            activity_timeline.append(
+                {
+                    "start": selected_start_clip,
+                    "duration": selected_seconds,
+                    "label": label,
+                    "source": source,
+                }
+            )
+
+        today_overlap = clipped_interval(event_start, event_end, today_start, today_end)
+        if today_overlap:
+            display_event = dict(event)
+            display_event["timestamp"] = today_overlap[0].isoformat()
+            display_event["duration"] = interval_seconds(today_overlap[0], today_overlap[1])
+            today_events.append(display_event)
+
     for bucket_id in groups["window"] + groups["web"]:
         for event in fetch_events(bucket_id, fetch_start, today_end):
-            event_start = parse_aw_time(event.get("timestamp"))
-            if not event_start:
-                continue
-            event_local = event_start.astimezone(JST)
-            sec = duration(event)
-            usage_for(event_local)["window"] += sec
-            if selected_start <= event_local < selected_end:
-                label = event_label(event, "window")
-                title = event_title(event)
-                app_seconds[label] = app_seconds.get(label, 0.0) + sec
-                if title:
-                    title_seconds[title] = title_seconds.get(title, 0.0) + sec
-                hourly_seconds[event_local.hour] += sec
-                activity_timeline.append({"start": event_local, "duration": sec, "label": label, "source": "pc"})
-            if today_start <= event_local <= today_end:
-                today_events.append(event)
+            record_event(event, "window", "pc", include_title=True)
 
     for bucket_id in groups["afk"]:
         for event in fetch_events(bucket_id, fetch_start, today_end):
             if (event.get("data") or {}).get("status") != "not-afk":
                 continue
-            event_start = parse_aw_time(event.get("timestamp"))
-            if not event_start:
+            interval = event_interval(event)
+            if not interval:
                 continue
-            usage_for(event_start.astimezone(JST))["active"] += duration(event)
+            visible = clipped_interval(interval[0], interval[1], fetch_start, today_end)
+            if visible:
+                add_usage_span(visible[0], visible[1], "active")
 
     for bucket_id in groups["android"]:
         for event in fetch_events(bucket_id, fetch_start, today_end):
-            event_start = parse_aw_time(event.get("timestamp"))
-            if not event_start:
-                continue
-            event_local = event_start.astimezone(JST)
-            sec = duration(event)
-            usage_for(event_local)["android"] += sec
-            if selected_start <= event_local < selected_end:
-                label = event_label(event, "android")
-                app_seconds[f"Android: {label}"] = app_seconds.get(f"Android: {label}", 0.0) + sec
-                hourly_seconds[event_local.hour] += sec
-                activity_timeline.append({"start": event_local, "duration": sec, "label": label, "source": "android"})
-            if today_start <= event_local <= today_end:
-                today_events.append(event)
+            record_event(event, "android", "android", label_prefix="Android: ")
 
     for bucket_id in groups["android_bridge"]:
         for event in fetch_events(bucket_id, fetch_start, today_end, base=ANDROID_AW_BASE):
-            event_start = parse_aw_time(event.get("timestamp"))
-            if not event_start:
-                continue
-            event_local = event_start.astimezone(JST)
-            sec = duration(event)
-            usage_for(event_local)["android"] += sec
-            if selected_start <= event_local < selected_end:
-                label = event_label(event, "android")
-                app_seconds[f"Android: {label}"] = app_seconds.get(f"Android: {label}", 0.0) + sec
-                hourly_seconds[event_local.hour] += sec
-                activity_timeline.append({"start": event_local, "duration": sec, "label": label, "source": "android"})
-            if today_start <= event_local <= today_end:
-                today_events.append(event)
+            record_event(event, "android", "android", label_prefix="Android: ")
 
     for event in imported_android_events:
-        event_start = parse_aw_time(event.get("timestamp"))
-        if not event_start:
-            continue
-        event_local = event_start.astimezone(JST)
-        if event_local < fetch_start or event_local > today_end:
-            continue
-        sec = duration(event)
-        usage_for(event_local)["android"] += sec
-        if selected_start <= event_local < selected_end:
-            label = event_label(event, "android")
-            app_seconds[f"Android: {label}"] = app_seconds.get(f"Android: {label}", 0.0) + sec
-            hourly_seconds[event_local.hour] += sec
-            activity_timeline.append({"start": event_local, "duration": sec, "label": label, "source": "android"})
-        if today_start <= event_local <= today_end:
-            today_events.append(event)
+        record_event(event, "android", "android", label_prefix="Android: ")
 
     for event in sender_android_events:
-        event_start = parse_aw_time(event.get("timestamp"))
-        if not event_start:
-            continue
-        event_local = event_start.astimezone(JST)
-        if event_local < fetch_start or event_local > today_end:
-            continue
-        sec = duration(event)
-        usage_for(event_local)["android"] += sec
-        if selected_start <= event_local < selected_end:
-            label = event_label(event, "android")
-            app_seconds[f"Android: {label}"] = app_seconds.get(f"Android: {label}", 0.0) + sec
-            hourly_seconds[event_local.hour] += sec
-            activity_timeline.append({"start": event_local, "duration": sec, "label": label, "source": "android"})
-        if today_start <= event_local <= today_end:
-            today_events.append(event)
+        record_event(event, "android", "android", label_prefix="Android: ")
 
     daily = []
     total_window_seconds = 0.0
@@ -785,15 +807,15 @@ def collect_summary(days: int) -> dict:
     sender_today_seconds = 0.0
 
     for event in sender_android_events:
-        event_start = parse_aw_time(event.get("timestamp"))
-        if not event_start:
+        interval = event_interval(event)
+        if not interval:
             continue
-        event_local = event_start.astimezone(JST)
-        sec = duration(event)
-        if selected_start <= event_local < selected_end:
-            sender_period_seconds += sec
-        if today_start <= event_local <= today_end:
-            sender_today_seconds += sec
+        selected = clipped_interval(interval[0], interval[1], selected_start, selected_end)
+        if selected:
+            sender_period_seconds += interval_seconds(selected[0], selected[1])
+        today_overlap = clipped_interval(interval[0], interval[1], today_start, today_end)
+        if today_overlap:
+            sender_today_seconds += interval_seconds(today_overlap[0], today_overlap[1])
 
     for start, end in bounds:
         usage = usage_by_date.get(start.strftime("%Y-%m-%d"), empty_usage())

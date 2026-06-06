@@ -70,6 +70,22 @@ The next polish pass should make both things more legible:
 - show Wi-Fi / 15-minute auto-sync status in the Android panel
 - keep recommendations short and specific
 
+### Expert Review: Measurement Integrity
+
+The next sharp issue was not visual. It was measurement integrity.
+
+Early aggregation assigned an event's whole duration to the day and hour where the event started. That is easy to implement, but it becomes wrong when a long activity crosses an hour boundary or midnight.
+
+The corrected design treats every event as a time interval:
+
+- daily totals receive only the seconds that overlap each day
+- hourly heat receives only the seconds that overlap each hour
+- selected-range rankings receive only the overlap with the selected range
+- today's recent records show only the portion that overlaps today
+- Android Sender "today" and "period" totals use the same interval logic
+
+This matters because the dashboard is no longer just decorative. Once it gives advice and scores, the underlying accounting has to be trustworthy.
+
 ## Phase 2: Goals Without Nagging
 
 Add a local `goals.json` with simple rules:
