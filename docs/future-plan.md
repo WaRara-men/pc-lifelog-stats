@@ -117,7 +117,15 @@ The current version focuses on the simplest reliable story:
 - peak hour
 - one next experiment
 
-This can later become Markdown export.
+Markdown export is now available from the dashboard header. It includes:
+
+- Story
+- Summary
+- Focus Lab
+- Score Breakdown
+- Goals
+- Top Apps
+- Daily table
 
 ## Phase 4: Categories
 

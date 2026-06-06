@@ -733,6 +733,102 @@ def build_period_story(daily: list[dict], stats: dict, focus_lab: dict, top_apps
     }
 
 
+def markdown_table(headers: list[str], rows: list[list[str]]) -> str:
+    lines = ["| " + " | ".join(headers) + " |", "| " + " | ".join(["---"] * len(headers)) + " |"]
+    for row in rows:
+        lines.append("| " + " | ".join(str(cell).replace("\n", " ") for cell in row) + " |")
+    return "\n".join(lines)
+
+
+def build_markdown_report(summary: dict) -> str:
+    story = summary.get("periodStory") or {}
+    focus = summary.get("focusLab") or {}
+    goals = summary.get("goalsPanel") or {}
+    stats = summary.get("stats") or {}
+    generated = summary.get("generatedAt", "")
+    days = summary.get("days", "")
+
+    lines = [
+        "# PC Lifelog Report",
+        "",
+        f"- Period: last {days} day(s)",
+        f"- Generated: {generated}",
+        "",
+        "## Story",
+        "",
+        story.get("headline", ""),
+        "",
+        story.get("summary", ""),
+        "",
+        f"**Next experiment:** {story.get('experiment', '')}",
+        "",
+        "## Summary",
+        "",
+        markdown_table(
+            ["Metric", "Value"],
+            [
+                ["Today", f"{stats.get('todayHours', 0)}h"],
+                ["Period total", f"{stats.get('periodTotalHours', 0)}h"],
+                ["Daily average", f"{stats.get('averageHours', 0)}h"],
+                ["Android", f"{stats.get('androidHours', 0)}h"],
+                ["Focus", f"{focus.get('grade', '--')} / {focus.get('score', '--')}"],
+            ],
+        ),
+        "",
+        "## Focus Lab",
+        "",
+        focus.get("summary", ""),
+        "",
+        markdown_table(
+            ["Signal", "Value", "Note"],
+            [[card.get("label", ""), card.get("value", ""), card.get("sub", "")] for card in focus.get("cards", [])],
+        ),
+        "",
+        "## Score Breakdown",
+        "",
+        markdown_table(
+            ["Part", "Value", "Why"],
+            [[row.get("label", ""), row.get("value", ""), row.get("note", "")] for row in focus.get("scoreBreakdown", [])],
+        ),
+        "",
+        "## Goals",
+        "",
+        goals.get("summary", ""),
+        "",
+        markdown_table(
+            ["Goal", "Now", "Target", "State"],
+            [
+                [
+                    goal.get("label", ""),
+                    f"{goal.get('value', 0)}{goal.get('unit', '')}",
+                    f"{goal.get('target', 0)}{goal.get('unit', '')}",
+                    goal.get("message", ""),
+                ]
+                for goal in goals.get("goals", [])
+            ],
+        ),
+        "",
+        "## Top Apps",
+        "",
+        markdown_table(
+            ["App", "Minutes"],
+            [[row.get("name", ""), str(row.get("minutes", 0))] for row in summary.get("topApps", [])[:8]],
+        ),
+        "",
+        "## Daily",
+        "",
+        markdown_table(
+            ["Date", "Total", "PC", "Android"],
+            [
+                [row.get("date", ""), f"{row.get('totalHours', 0)}h", f"{row.get('pcWindowHours', 0)}h", f"{row.get('androidHours', 0)}h"]
+                for row in summary.get("daily", [])
+            ],
+        ),
+        "",
+    ]
+    return "\n".join(lines)
+
+
 def day_bounds(days: int) -> list[tuple[datetime, datetime]]:
     now = datetime.now(JST)
     today = datetime(now.year, now.month, now.day, tzinfo=JST)
@@ -1277,6 +1373,7 @@ INDEX_HTML = r"""<!doctype html>
         <option value="30">直近30日</option>
       </select>
       <button class="primary" id="reload">更新</button>
+      <button id="downloadReport">Report</button>
       <div class="status" id="status">読み込み中...</div>
     </div>
   </header>
@@ -1569,6 +1666,10 @@ INDEX_HTML = r"""<!doctype html>
 
     document.getElementById('reload').addEventListener('click', load);
     document.getElementById('days').addEventListener('change', load);
+    document.getElementById('downloadReport').addEventListener('click', () => {
+      const days = document.getElementById('days').value;
+      window.location.href = `/api/report/markdown?days=${days}`;
+    });
     document.getElementById('showQr').addEventListener('click', () => {
       document.getElementById('qrImage').src = `/api/android/pairing-qr?t=${Date.now()}`;
       document.getElementById('qrBox').classList.add('visible');
@@ -1628,6 +1729,20 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as exc:
                 self.send_json({"ok": False, "message": str(exc)}, status=500)
             return
+        if parsed.path == "/api/report/markdown":
+            qs = parse_qs(parsed.query)
+            try:
+                days = int(qs.get("days", ["7"])[0])
+            except ValueError:
+                days = 7
+            days = max(1, min(days, 30))
+            try:
+                report = build_markdown_report(collect_summary(days))
+                filename = f"pc-lifelog-report-{datetime.now(JST).strftime('%Y%m%d-%H%M')}.md"
+                self.send_download(report, "text/markdown; charset=utf-8", filename)
+            except Exception as exc:
+                self.send_json({"ok": False, "message": str(exc)}, status=500)
+            return
         self.send_json({"ok": False, "message": "not found"}, status=404)
 
     def do_POST(self):
@@ -1676,6 +1791,15 @@ class Handler(BaseHTTPRequestHandler):
     def send_bytes(self, body: bytes, content_type: str, status: int = 200):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def send_download(self, text: str, content_type: str, filename: str):
+        body = text.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
