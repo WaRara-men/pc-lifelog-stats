@@ -101,13 +101,21 @@ The dashboard shows progress, not blame. The goal is to help the user choose the
 
 ## Phase 3: Weekly Story
 
-Generate a weekly report inside the app:
+Implemented as the first Story panel. It reads the selected period and summarizes:
 
 - best focus day
 - worst drift day
 - top Android pull app
 - most stable work window
 - one next experiment for the coming week
+
+The current version focuses on the simplest reliable story:
+
+- heaviest day
+- quietest active day
+- front-half/back-half trend
+- peak hour
+- one next experiment
 
 This can later become Markdown export.
 

@@ -685,6 +685,54 @@ def build_goals_panel(stats: dict, focus_lab: dict, goals: dict) -> dict:
     }
 
 
+def build_period_story(daily: list[dict], stats: dict, focus_lab: dict, top_apps: list[tuple[str, float]], hourly_seconds: list[float]) -> dict:
+    active_days = [day for day in daily if float(day.get("totalHours") or 0.0) > 0]
+    if not active_days:
+        return {
+            "headline": "まだストーリーを作れるほどの記録がありません。",
+            "summary": "ActivityWatchとAndroid Senderが動くと、期間全体の読み解きがここに出ます。",
+            "cards": [],
+            "experiment": "まずは今日の記録を1日分ためるところから。",
+        }
+
+    heaviest = max(active_days, key=lambda day: float(day.get("totalHours") or 0.0))
+    quietest = min(active_days, key=lambda day: float(day.get("totalHours") or 0.0))
+    midpoint = max(1, len(daily) // 2)
+    first_half = daily[:midpoint]
+    second_half = daily[midpoint:]
+    first_avg = sum(float(day.get("totalHours") or 0.0) for day in first_half) / max(1, len(first_half))
+    second_avg = sum(float(day.get("totalHours") or 0.0) for day in second_half) / max(1, len(second_half))
+    delta = round(second_avg - first_avg, 2)
+    trend = "増え気味" if delta > 0.35 else ("落ち着き気味" if delta < -0.35 else "安定")
+    peak_hour = max(range(24), key=lambda hour: hourly_seconds[hour]) if hourly_seconds else 0
+    top_app_name = top_apps[0][0] if top_apps else "まだデータなし"
+    android_share = float(focus_lab.get("androidShare") or 0.0)
+
+    if android_share >= 35:
+        experiment = "次の期間は、スマホを見る前にPC側で目的を一行だけ置いてから開く。"
+    elif float(focus_lab.get("switchesPerHour") or 0.0) >= 5:
+        experiment = "次の期間は、25分だけ主役アプリを一つに固定する時間を作る。"
+    elif float(focus_lab.get("nightShare") or 0.0) >= 25:
+        experiment = "次の期間は、21時以降のピークを15分だけ前にずらす。"
+    else:
+        experiment = "次の期間は、このリズムを崩さずDeep Workをもう15分だけ足す。"
+
+    headline = f"{len(daily)}日間は {trend}。一番濃い日は {heaviest['date']} の {heaviest['totalHours']}h。"
+    summary = f"主役は {top_app_name}。ピークは {peak_hour}:00台で、Focusは {focus_lab.get('grade', '--')} / {focus_lab.get('score', '--')} 点でした。"
+
+    return {
+        "headline": headline,
+        "summary": summary,
+        "cards": [
+            {"label": "Heaviest day", "value": f"{heaviest['totalHours']}h", "sub": heaviest["date"]},
+            {"label": "Quietest active day", "value": f"{quietest['totalHours']}h", "sub": quietest["date"]},
+            {"label": "Trend", "value": trend, "sub": f"後半平均 {second_avg:.2f}h / 前半差 {delta:+.2f}h"},
+            {"label": "Peak hour", "value": f"{peak_hour}:00", "sub": f"{round_minutes(hourly_seconds[peak_hour])}m"},
+        ],
+        "experiment": experiment,
+    }
+
+
 def day_bounds(days: int) -> list[tuple[datetime, datetime]]:
     now = datetime.now(JST)
     today = datetime(now.year, now.month, now.day, tzinfo=JST)
@@ -971,6 +1019,7 @@ def collect_summary(days: int) -> dict:
         "stats": stats,
         "focusLab": focus_lab,
         "goalsPanel": build_goals_panel(stats, focus_lab, load_goals()),
+        "periodStory": build_period_story(daily, stats, focus_lab, top_apps, hourly_seconds),
         "daily": daily,
         "calendar": build_calendar(usage_by_date),
         "hourly": [{"hour": h, "minutes": round_minutes(sec)} for h, sec in enumerate(hourly_seconds)],
@@ -1109,6 +1158,12 @@ INDEX_HTML = r"""<!doctype html>
     .goal-fill { height: 100%; background: var(--accent); border-radius: 999px; }
     .goal-card.over .goal-fill { background: #dc2626; }
     .goal-card.watch .goal-fill { background: #c2410c; }
+    .story-headline { font-size: 18px; font-weight: 820; line-height: 1.55; margin-bottom: 6px; }
+    .story-summary { color: var(--muted); line-height: 1.6; margin-bottom: 12px; }
+    .story-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+    .story-card { border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #f8fafc; min-height: 92px; }
+    .story-card strong { display: block; font-size: 23px; margin: 5px 0 3px; }
+    .experiment { border-left: 3px solid var(--accent2); background: #faf5ff; border-radius: 6px; padding: 10px 12px; margin-top: 12px; color: #3b0764; }
     .breakdown {
       display: grid;
       grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -1188,6 +1243,7 @@ INDEX_HTML = r"""<!doctype html>
       .focus-lab { grid-template-columns: 1fr; }
       .metric-grid { grid-template-columns: repeat(2, 1fr); }
       .goal-grid { grid-template-columns: repeat(2, 1fr); }
+      .story-grid { grid-template-columns: repeat(2, 1fr); }
       .breakdown { grid-template-columns: repeat(2, 1fr); }
       .pairing { grid-template-columns: 1fr; }
       .connection-row { grid-template-columns: 1fr; }
@@ -1199,6 +1255,7 @@ INDEX_HTML = r"""<!doctype html>
       .value { font-size: 28px; }
       .metric-grid { grid-template-columns: 1fr; }
       .goal-grid { grid-template-columns: 1fr; }
+      .story-grid { grid-template-columns: 1fr; }
       .breakdown { grid-template-columns: 1fr; }
       .hours { grid-template-columns: repeat(12, 1fr); row-gap: 20px; }
       .cal-day { min-height: 58px; padding: 5px; }
@@ -1261,6 +1318,16 @@ INDEX_HTML = r"""<!doctype html>
       <div class="goal-summary" id="goalSummary">目標を確認中...</div>
       <div class="goal-grid" id="goalGrid"></div>
       <div class="sub">設定は <span class="mono">local_data/goals.json</span> で上書きできます。</div>
+    </section>
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Story</h2>
+        <div class="hint">選択期間を一文で読む</div>
+      </div>
+      <div class="story-headline" id="storyHeadline">読み解き中...</div>
+      <div class="story-summary" id="storySummary"></div>
+      <div class="story-grid" id="storyGrid"></div>
+      <div class="experiment" id="storyExperiment"></div>
     </section>
     <section class="panel">
       <div class="panel-head">
@@ -1357,6 +1424,7 @@ INDEX_HTML = r"""<!doctype html>
       document.getElementById('max').textContent = fmtHours(data.stats.maxHours);
       renderFocusLab(data.focusLab || {});
       renderGoals(data.goalsPanel || {});
+      renderStory(data.periodStory || {});
       renderSender(data);
       renderInsights(data);
       renderCalendar(data.calendar);
@@ -1378,6 +1446,20 @@ INDEX_HTML = r"""<!doctype html>
       document.getElementById('recent').innerHTML = data.recent.length ? data.recent.map(r =>
         `<tr><td>${esc(r.time)}</td><td>${esc(r.name)}</td><td>${esc(r.title)}</td><td>${fmtMinutes(r.minutes)}</td></tr>`
       ).join('') : '<tr><td colspan="4" class="empty">今日の記録がまだ少ないです</td></tr>';
+    }
+
+    function renderStory(story) {
+      document.getElementById('storyHeadline').textContent = story.headline || 'まだ読み解きがありません。';
+      document.getElementById('storySummary').textContent = story.summary || '';
+      const cards = Array.isArray(story.cards) ? story.cards : [];
+      document.getElementById('storyGrid').innerHTML = cards.map(card => `
+        <div class="story-card">
+          <div class="label">${esc(card.label)}</div>
+          <strong>${esc(card.value)}</strong>
+          <div class="sub">${esc(card.sub)}</div>
+        </div>
+      `).join('');
+      document.getElementById('storyExperiment').textContent = story.experiment ? `次の実験: ${story.experiment}` : '';
     }
 
     function renderGoals(panel) {
