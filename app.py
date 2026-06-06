@@ -1317,10 +1317,28 @@ INDEX_HTML = r"""<!doctype html>
     .track { height: 9px; background: #e8edf2; border-radius: 999px; overflow: hidden; margin-top: 4px; }
     .fill { height: 100%; background: var(--accent); border-radius: 999px; min-width: 2px; }
     .bar-value { font-variant-numeric: tabular-nums; color: var(--muted); text-align: right; font-size: 13px; }
-    .daily { display: grid; grid-template-columns: repeat(auto-fit, minmax(48px, 1fr)); gap: 8px; align-items: end; height: 220px; padding-top: 8px; }
-    .day { display: flex; flex-direction: column; gap: 6px; align-items: center; min-width: 0; }
+    .daily {
+      display: grid;
+      grid-auto-flow: column;
+      grid-auto-columns: minmax(42px, 1fr);
+      gap: 8px;
+      align-items: end;
+      height: 176px;
+      overflow-x: auto;
+      overflow-y: hidden;
+      padding: 6px 0 2px;
+    }
+    .day {
+      display: grid;
+      grid-template-rows: 24px 102px 24px;
+      align-items: end;
+      justify-items: center;
+      min-width: 42px;
+      height: 154px;
+    }
+    .day-value { font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
     .day-bar { width: 100%; min-height: 2px; background: var(--accent2); border-radius: 4px 4px 0 0; }
-    .day small { color: var(--muted); font-size: 11px; writing-mode: vertical-rl; transform: rotate(180deg); height: 60px; }
+    .day small { color: var(--muted); font-size: 10px; white-space: nowrap; }
     .hours { display: grid; grid-template-columns: repeat(24, 1fr); gap: 3px; }
     .hour { height: 48px; border-radius: 4px; background: #e8edf2; position: relative; }
     .hour span { position: absolute; bottom: -18px; left: 0; font-size: 10px; color: var(--muted); }
@@ -1528,8 +1546,9 @@ INDEX_HTML = r"""<!doctype html>
 
       const maxDaily = Math.max(...data.daily.map(d => d.totalHours), 0.1);
       document.getElementById('daily').innerHTML = data.daily.map(d => {
-        const h = Math.max(2, (d.totalHours / maxDaily) * 150);
-        return `<div class="day" title="${d.date} ${fmtHours(d.totalHours)}"><div>${fmtHours(d.totalHours)}</div><div class="day-bar" style="height:${h}px"></div><small>${d.date}</small></div>`;
+        const h = Math.max(2, (d.totalHours / maxDaily) * 102);
+        const shortDate = d.date.slice(5);
+        return `<div class="day" title="${d.date} ${fmtHours(d.totalHours)}"><div class="day-value">${fmtHours(d.totalHours)}</div><div class="day-bar" style="height:${h}px"></div><small>${shortDate}</small></div>`;
       }).join('');
 
       const maxHour = Math.max(...data.hourly.map(h => h.minutes), 0.1);
@@ -1668,6 +1687,11 @@ INDEX_HTML = r"""<!doctype html>
     document.getElementById('days').addEventListener('change', load);
     document.getElementById('downloadReport').addEventListener('click', () => {
       const days = document.getElementById('days').value;
+      const button = document.getElementById('downloadReport');
+      const oldText = button.textContent;
+      button.textContent = '作成中...';
+      document.getElementById('status').textContent = 'Markdownレポートを作成中...';
+      setTimeout(() => { button.textContent = oldText; }, 1600);
       window.location.href = `/api/report/markdown?days=${days}`;
     });
     document.getElementById('showQr').addEventListener('click', () => {
