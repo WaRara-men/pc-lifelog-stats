@@ -1,8 +1,16 @@
 # PC Lifelog Stats
 
-自分がPCをどれだけ見ているのかを、ActivityWatchのログから見える化するローカルダッシュボードです。
+Windows PCとAndroidスマホのスクリーンタイムを、ひとつのローカル画面で見るためのライフログダッシュボードです。
 
-今日の使用時間、アプリ別ランキング、時間帯ヒート、月間カレンダーをまとめて表示します。Android版ActivityWatchのログをPCに同期すれば、スマホ利用も同じ画面で合算できます。
+PC側はActivityWatch、Android側は同梱の **PC Lifelog Sender** から取得します。スマホは初回だけPC画面のQRを読み取ればOK。以後はWi-Fi接続時に15分ごとに自動送信され、PCのカレンダー、ランキング、時間帯ヒートに合算されます。
+
+**Highlights**
+
+- PCとAndroidの使用時間を同じ画面で合算
+- 初回だけQRペアリング、その後はQR不要
+- Androidは15分ごとにWi-Fiで自動送信
+- 接続状態、最終受信時刻、今日のスマホ使用時間をダッシュボードに表示
+- 個人ログとtokenは `local_data/` に保存し、Gitには載せないlocal-first設計
 
 ![Dashboard preview](https://raw.githubusercontent.com/WaRara-men/pc-lifelog-stats/main/docs/dashboard-preview.svg)
 
@@ -15,13 +23,21 @@
 - ウィンドウタイトル別の使用時間ランキング
 - 何時台によく使っているかが分かる時間帯ヒート
 - 最近のアクティビティ一覧
-- Androidログ同期後の自動合算
+- Android Senderの接続状態と最終受信
+
+## Android Companion
+
+このリポジトリには、Android端末からPCへスクリーンタイムを送る companion app が入っています。
+
+PC側のダッシュボードで `Android連携` のQRを表示し、Androidアプリ **PC Lifelog Sender** で一度だけ読み取ります。スマホ側に接続先とtokenが保存されるので、次回以降はQRを読み直す必要がありません。
+
+自動同期はWi-Fiなどの非従量課金ネットワークで動く設計です。機内モードや外出中で送れなかった分は端末内に残り、次に送れるタイミングでまとめてPCへ送信します。
 
 ## Why
 
 ActivityWatchは強力ですが、「とりあえず今日どれだけ見たか」「今月の濃い日がどこか」を一目で見るには少し距離があります。
 
-このアプリは、細かいログを読むためではなく、自分の生活リズムをぱっと掴むための画面です。使いすぎを責めるより、まず自分の時間の形を見えるようにすることを目指しています。
+このアプリは、細かいログを読むためだけではなく、自分の生活リズムをぱっと掴むための画面です。PCとスマホを別々に眺めるのではなく、「今日、自分は画面とどう付き合っていたか」をひと目で見えるようにすることを目指しています。
 
 ## Requirements
 
@@ -53,7 +69,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install_start_menu_shortcu
 
 登録後は、Windowsキーを押して `lifelog` または `PC` と検索すると **PC Lifelog Stats** が出ます。
 
-## Android Sender Pairing
+## Pair Android by QR
 
 Android companion appを使う場合は、PC側にQRを表示して初回だけ読み取ります。読み取り後、スマホ側に接続先とtokenが保存されるため、次回以降QRは不要です。
 
@@ -77,7 +93,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\enable_android_sender_fire
 
 Android側はこの情報を保存し、以後は `POST /api/android/events` にtoken付きで送信します。
 
-Androidアプリ本体は `android-sender/` にあります。Android Studioで開いて `app` モジュールをビルドします。
+Androidアプリ本体は `android-sender/` にあります。Android Studioで開いて `app` モジュールをビルドします。現時点では個人利用向けのdebug APKとして扱っています。
 
 ローカルでビルドしたdebug APKは以下に出ます。
 
