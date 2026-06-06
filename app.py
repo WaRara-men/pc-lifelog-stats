@@ -460,6 +460,7 @@ def build_focus_lab(activity_events: list[dict], pc_seconds: float, android_seco
         return {
             "score": 0,
             "grade": "NO DATA",
+            "confidence": "LOW",
             "summary": "まだ分析できるだけの画面時間がありません。",
             "deepWorkMinutes": 0,
             "longestBlockMinutes": 0,
@@ -467,7 +468,9 @@ def build_focus_lab(activity_events: list[dict], pc_seconds: float, android_seco
             "switchesPerHour": 0,
             "androidShare": 0,
             "nightShare": 0,
+            "analyzedEvents": 0,
             "cards": [],
+            "scoreBreakdown": [],
             "recommendations": ["ActivityWatchとAndroid Senderが動くと、ここに集中度の読み解きが出ます。"],
         }
 
@@ -510,6 +513,7 @@ def build_focus_lab(activity_events: list[dict], pc_seconds: float, android_seco
     deep_bonus = min(18, deep_ratio * 35)
     score = 72 + deep_bonus - switch_penalty - android_penalty - night_penalty
     score = int(round(clamp(score, 0, 100)))
+    confidence = "HIGH" if total_seconds >= 3 * 3600 and len(events) >= 40 else ("MED" if total_seconds >= 3600 and len(events) >= 12 else "LOW")
 
     if score >= 82:
         grade = "DEEP"
@@ -539,6 +543,7 @@ def build_focus_lab(activity_events: list[dict], pc_seconds: float, android_seco
     return {
         "score": score,
         "grade": grade,
+        "confidence": confidence,
         "summary": summary,
         "deepWorkMinutes": round_minutes(deep_work_seconds),
         "longestBlockMinutes": round_minutes(longest_block_seconds),
@@ -546,6 +551,14 @@ def build_focus_lab(activity_events: list[dict], pc_seconds: float, android_seco
         "switchesPerHour": round(switches_per_hour, 1),
         "androidShare": round(android_share * 100, 1),
         "nightShare": round(night_share * 100, 1),
+        "analyzedEvents": len(events),
+        "scoreBreakdown": [
+            {"label": "Base", "value": "+72", "note": "ふつうの日の出発点"},
+            {"label": "Deep Work", "value": f"+{round(deep_bonus, 1)}", "note": "25分以上の塊で加点"},
+            {"label": "Switching", "value": f"-{round(switch_penalty, 1)}", "note": "意味のある切り替えで減点"},
+            {"label": "Android Pull", "value": f"-{round(android_penalty, 1)}", "note": "スマホ比率が15%を超えた分"},
+            {"label": "Night Drift", "value": f"-{round(night_penalty, 1)}", "note": "21時以降が22%を超えた分"},
+        ],
         "cards": [
             {"label": "Deep Work", "value": f"{round_minutes(deep_work_seconds)}m", "sub": "25分以上のPC集中ブロック"},
             {"label": "Switching", "value": f"{context_switches}", "sub": f"1時間あたり {round(switches_per_hour, 1)} 回"},
@@ -950,6 +963,7 @@ INDEX_HTML = r"""<!doctype html>
     .grade { display: inline-flex; align-self: flex-start; padding: 5px 9px; border-radius: 999px; background: rgba(255,255,255,.14); font-size: 12px; font-weight: 800; }
     .focus-copy { display: flex; flex-direction: column; gap: 12px; }
     .focus-summary { font-size: 17px; font-weight: 750; line-height: 1.6; }
+    .score-meta { color: var(--muted); font-size: 12px; }
     .metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
     .metric {
       border: 1px solid var(--line);
@@ -961,6 +975,14 @@ INDEX_HTML = r"""<!doctype html>
     .metric strong { display: block; font-size: 24px; margin: 5px 0 3px; }
     .actions { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
     .actions li { border-left: 3px solid var(--accent); padding: 7px 10px; background: #f8fafc; border-radius: 6px; color: #334155; }
+    .breakdown {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .breakdown-item { border: 1px solid var(--line); border-radius: 8px; padding: 9px; background: #ffffff; }
+    .breakdown-item strong { display: block; font-size: 17px; margin-bottom: 3px; }
+    .breakdown-item span { display: block; color: var(--muted); font-size: 11px; line-height: 1.35; }
     .layout { display: grid; grid-template-columns: 1.15fr .85fr; gap: 16px; align-items: start; }
     .panel { padding: 16px; margin-bottom: 16px; }
     h2 { margin: 0 0 12px; font-size: 17px; }
@@ -994,10 +1016,11 @@ INDEX_HTML = r"""<!doctype html>
     .insight span { color: var(--muted); font-size: 13px; }
     .pairing { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 16px; align-items: center; }
     .pairing-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
-    .connection-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 10px 0 12px; }
+    .connection-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 10px 0 12px; }
     .connection-pill { border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: #f8fafc; }
     .connection-pill.ok { border-color: rgba(15,118,110,.35); background: #ecfdf5; }
     .connection-pill strong { display: block; font-size: 18px; margin-top: 4px; }
+    .connection-pill .mini { color: var(--muted); font-size: 11px; margin-top: 4px; line-height: 1.35; }
     .qr-box { display: none; justify-self: end; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
     .qr-box.visible { display: block; }
     .qr-box img { display: block; width: 190px; height: 190px; }
@@ -1030,6 +1053,7 @@ INDEX_HTML = r"""<!doctype html>
       .insights { grid-template-columns: 1fr; }
       .focus-lab { grid-template-columns: 1fr; }
       .metric-grid { grid-template-columns: repeat(2, 1fr); }
+      .breakdown { grid-template-columns: repeat(2, 1fr); }
       .pairing { grid-template-columns: 1fr; }
       .connection-row { grid-template-columns: 1fr; }
       .qr-box { justify-self: start; }
@@ -1039,6 +1063,7 @@ INDEX_HTML = r"""<!doctype html>
       .grid { grid-template-columns: 1fr; }
       .value { font-size: 28px; }
       .metric-grid { grid-template-columns: 1fr; }
+      .breakdown { grid-template-columns: 1fr; }
       .hours { grid-template-columns: repeat(12, 1fr); row-gap: 20px; }
       .cal-day { min-height: 58px; padding: 5px; }
       .cal-hours { font-size: 13px; }
@@ -1085,7 +1110,9 @@ INDEX_HTML = r"""<!doctype html>
         </div>
         <div class="focus-copy">
           <div class="focus-summary" id="focusSummary">分析中...</div>
+          <div class="score-meta" id="focusMeta"></div>
           <div class="metric-grid" id="focusCards"></div>
+          <div class="breakdown" id="focusBreakdown"></div>
           <ul class="actions" id="focusActions"></ul>
         </div>
       </div>
@@ -1102,6 +1129,7 @@ INDEX_HTML = r"""<!doctype html>
             <div class="connection-pill" id="senderConnectionPill"><div class="label">接続</div><strong id="senderConnection">--</strong></div>
             <div class="connection-pill"><div class="label">今日の自動送信分</div><strong id="senderToday">--</strong></div>
             <div class="connection-pill"><div class="label">Android合計</div><strong id="androidTotal">--</strong></div>
+            <div class="connection-pill"><div class="label">自動同期</div><strong id="androidSyncMode">Wi-Fi</strong><div class="mini" id="androidSyncHint">おおむね15分ごと</div></div>
           </div>
           <div id="senderUrl" class="mono"></div>
           <div id="senderEndpoints" class="endpoint-list mono"></div>
@@ -1210,12 +1238,21 @@ INDEX_HTML = r"""<!doctype html>
       document.getElementById('focusScore').textContent = focus.score ?? '--';
       document.getElementById('focusGrade').textContent = focus.grade || '--';
       document.getElementById('focusSummary').textContent = focus.summary || 'まだ分析できるだけのデータがありません。';
+      document.getElementById('focusMeta').textContent = `信頼度 ${focus.confidence || 'LOW'} / 分析イベント ${focus.analyzedEvents ?? 0} 件`;
       const cards = Array.isArray(focus.cards) ? focus.cards : [];
       document.getElementById('focusCards').innerHTML = cards.map(card => `
         <div class="metric">
           <div class="label">${esc(card.label)}</div>
           <strong>${esc(card.value)}</strong>
           <div class="sub">${esc(card.sub)}</div>
+        </div>
+      `).join('');
+      const breakdown = Array.isArray(focus.scoreBreakdown) ? focus.scoreBreakdown : [];
+      document.getElementById('focusBreakdown').innerHTML = breakdown.map(item => `
+        <div class="breakdown-item">
+          <strong>${esc(item.value)}</strong>
+          <div>${esc(item.label)}</div>
+          <span>${esc(item.note)}</span>
         </div>
       `).join('');
       const actions = Array.isArray(focus.recommendations) ? focus.recommendations : [];
@@ -1233,6 +1270,8 @@ INDEX_HTML = r"""<!doctype html>
       document.getElementById('senderConnectionPill').classList.toggle('ok', fresh || events > 0);
       document.getElementById('senderToday').textContent = fmtHours(data.stats.senderTodayHours || 0);
       document.getElementById('androidTotal').textContent = fmtHours(data.stats.androidHours || 0);
+      const nextHint = typeof mins === 'number' && mins <= 60 ? `前回から${mins}分 / 15分目安` : 'Wi-Fi接続時に自動送信';
+      document.getElementById('androidSyncHint').textContent = nextHint;
       document.getElementById('senderUrl').textContent = status.receiver ? `優先受信先: ${status.receiver}` : '';
       const endpoints = Array.isArray(status.endpoints) ? status.endpoints : [];
       document.getElementById('senderEndpoints').innerHTML = endpoints.map(ep =>

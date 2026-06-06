@@ -61,6 +61,8 @@ flowchart LR
 - `Switching`: アプリやデバイスを切り替えた回数
 - `Android Pull`: 全体に占めるスマホ比率
 - `Night Drift`: 21時以降に寄った画面時間
+- `Score Breakdown`: 点数の加点・減点理由
+- `Confidence`: 分析に使えたイベント量から見た信頼度
 
 さらに、その日の形に応じた短い読み解きを出します。
 

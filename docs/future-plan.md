@@ -56,6 +56,20 @@ Focus Lab reads the existing timeline and produces:
 
 This turns "I used screens for 4.27h" into "today was steady, but Android pull was high."
 
+### Review Notes
+
+The first version had two risks:
+
+- Focus Score could feel like a black box.
+- Android could be connected technically, but still not feel alive in the UI.
+
+The next polish pass should make both things more legible:
+
+- show the score breakdown near the score
+- show confidence based on analyzed event volume
+- show Wi-Fi / 15-minute auto-sync status in the Android panel
+- keep recommendations short and specific
+
 ## Phase 2: Goals Without Nagging
 
 Add a local `goals.json` with simple rules:
