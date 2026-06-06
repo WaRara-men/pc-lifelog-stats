@@ -35,6 +35,13 @@ SENDER_TOKEN_PATH = LOCAL_DATA_DIR / "sender_token.txt"
 SENDER_STATUS_PATH = LOCAL_DATA_DIR / "sender_status.json"
 IMPORT_SOURCES_PATH = LOCAL_DATA_DIR / "import_sources.json"
 IMPORT_STATE_PATH = LOCAL_DATA_DIR / "import_state.json"
+GOALS_PATH = LOCAL_DATA_DIR / "goals.json"
+DEFAULT_GOALS = {
+    "screen_hours_limit": 6.0,
+    "android_hours_limit": 2.0,
+    "deep_work_minutes_target": 60.0,
+    "night_drift_percent_limit": 25.0,
+}
 
 
 def iso_z(dt: datetime) -> str:
@@ -113,6 +120,18 @@ def load_imported_android_events() -> list[dict]:
 def load_sender_android_events() -> list[dict]:
     data = read_json_file(ANDROID_SENDER_PATH, [])
     return data if isinstance(data, list) else []
+
+
+def load_goals() -> dict:
+    data = read_json_file(GOALS_PATH, {})
+    goals = dict(DEFAULT_GOALS)
+    if isinstance(data, dict):
+        for key, default in DEFAULT_GOALS.items():
+            try:
+                goals[key] = max(0.0, float(data.get(key, default)))
+            except (TypeError, ValueError):
+                goals[key] = default
+    return goals
 
 
 def get_sender_token() -> str:
@@ -590,6 +609,82 @@ def build_focus_lab(activity_events: list[dict], pc_seconds: float, android_seco
     }
 
 
+def limit_goal(label: str, value: float, limit: float, unit: str) -> dict:
+    ratio = value / limit if limit else 0.0
+    remaining = max(0.0, limit - value)
+    if ratio <= 0.8:
+        state = "good"
+        message = "余裕あり"
+    elif ratio <= 1.0:
+        state = "watch"
+        message = "そろそろ意識"
+    else:
+        state = "over"
+        message = "超過"
+    return {
+        "label": label,
+        "type": "limit",
+        "value": round(value, 2),
+        "target": round(limit, 2),
+        "unit": unit,
+        "progress": round(clamp(ratio, 0.0, 1.25) * 100, 1),
+        "remaining": round(remaining, 2),
+        "state": state,
+        "message": message,
+    }
+
+
+def target_goal(label: str, value: float, target: float, unit: str) -> dict:
+    ratio = value / target if target else 0.0
+    remaining = max(0.0, target - value)
+    if ratio >= 1.0:
+        state = "good"
+        message = "達成"
+    elif ratio >= 0.65:
+        state = "watch"
+        message = "あと少し"
+    else:
+        state = "open"
+        message = "これから"
+    return {
+        "label": label,
+        "type": "target",
+        "value": round(value, 2),
+        "target": round(target, 2),
+        "unit": unit,
+        "progress": round(clamp(ratio, 0.0, 1.0) * 100, 1),
+        "remaining": round(remaining, 2),
+        "state": state,
+        "message": message,
+    }
+
+
+def build_goals_panel(stats: dict, focus_lab: dict, goals: dict) -> dict:
+    rows = [
+        limit_goal("Screen budget", float(stats.get("todayHours") or 0.0), goals["screen_hours_limit"], "h"),
+        limit_goal("Android budget", float(stats.get("todayAndroidHours") or 0.0), goals["android_hours_limit"], "h"),
+        target_goal("Deep work", float(focus_lab.get("deepWorkMinutes") or 0.0), goals["deep_work_minutes_target"], "m"),
+        limit_goal("Night drift", float(focus_lab.get("nightShare") or 0.0), goals["night_drift_percent_limit"], "%"),
+    ]
+    over_count = len([row for row in rows if row["state"] == "over"])
+    good_count = len([row for row in rows if row["state"] == "good"])
+    if over_count:
+        summary = "今日は少し超過あり。まず一つだけ薄くできれば十分です。"
+        tone = "watch"
+    elif good_count >= 3:
+        summary = "かなり良い形。目標に縛られず、このリズムを守れています。"
+        tone = "good"
+    else:
+        summary = "まだ途中。数字を責めず、残りの画面時間を選べる状態です。"
+        tone = "open"
+    return {
+        "summary": summary,
+        "tone": tone,
+        "goals": rows,
+        "source": "local_data/goals.json",
+    }
+
+
 def day_bounds(days: int) -> list[tuple[datetime, datetime]]:
     now = datetime.now(JST)
     today = datetime(now.year, now.month, now.day, tzinfo=JST)
@@ -844,6 +939,22 @@ def collect_summary(days: int) -> dict:
     sender_status["minutesSinceLastReceived"] = minutes_since_iso(sender_status.get("last_received_at"))
     total_pc_seconds = max(total_window_seconds, total_afk_active_seconds)
     total_screen_seconds = total_pc_seconds + total_android_seconds
+    stats = {
+        "todayHours": daily[-1]["totalHours"] if daily else 0,
+        "todayAndroidHours": daily[-1]["androidHours"] if daily else 0,
+        "periodTotalHours": round(sum(daily_totals), 2),
+        "averageHours": round(sum(daily_totals) / len(daily_totals), 2) if daily_totals else 0,
+        "medianHours": round(median(daily_totals), 2),
+        "maxHours": round(max(daily_totals), 2) if daily_totals else 0,
+        "pcWindowHours": round_hours(total_window_seconds),
+        "pcActiveHours": round_hours(total_afk_active_seconds),
+        "androidHours": round_hours(total_android_seconds),
+        "pcHours": round_hours(total_pc_seconds),
+        "screenHours": round_hours(total_screen_seconds),
+        "senderTodayHours": round_hours(sender_today_seconds),
+        "senderPeriodHours": round_hours(sender_period_seconds),
+    }
+    focus_lab = build_focus_lab(activity_timeline, total_pc_seconds, total_android_seconds, hourly_seconds)
 
     result = {
         "ok": True,
@@ -857,21 +968,9 @@ def collect_summary(days: int) -> dict:
         "senderAndroidEvents": len(sender_android_events),
         "senderStatus": sender_status,
         "androidImportStatus": import_status,
-        "stats": {
-            "todayHours": daily[-1]["totalHours"] if daily else 0,
-            "periodTotalHours": round(sum(daily_totals), 2),
-            "averageHours": round(sum(daily_totals) / len(daily_totals), 2) if daily_totals else 0,
-            "medianHours": round(median(daily_totals), 2),
-            "maxHours": round(max(daily_totals), 2) if daily_totals else 0,
-            "pcWindowHours": round_hours(total_window_seconds),
-            "pcActiveHours": round_hours(total_afk_active_seconds),
-            "androidHours": round_hours(total_android_seconds),
-            "pcHours": round_hours(total_pc_seconds),
-            "screenHours": round_hours(total_screen_seconds),
-            "senderTodayHours": round_hours(sender_today_seconds),
-            "senderPeriodHours": round_hours(sender_period_seconds),
-        },
-        "focusLab": build_focus_lab(activity_timeline, total_pc_seconds, total_android_seconds, hourly_seconds),
+        "stats": stats,
+        "focusLab": focus_lab,
+        "goalsPanel": build_goals_panel(stats, focus_lab, load_goals()),
         "daily": daily,
         "calendar": build_calendar(usage_by_date),
         "hourly": [{"hour": h, "minutes": round_minutes(sec)} for h, sec in enumerate(hourly_seconds)],
@@ -997,6 +1096,19 @@ INDEX_HTML = r"""<!doctype html>
     .metric strong { display: block; font-size: 24px; margin: 5px 0 3px; }
     .actions { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
     .actions li { border-left: 3px solid var(--accent); padding: 7px 10px; background: #f8fafc; border-radius: 6px; color: #334155; }
+    .goal-summary { color: #334155; font-size: 15px; margin-bottom: 12px; }
+    .goal-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+    .goal-card { border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #f8fafc; min-height: 118px; }
+    .goal-card.good { background: #ecfdf5; border-color: rgba(15,118,110,.28); }
+    .goal-card.watch { background: #fff7ed; border-color: rgba(194,65,12,.24); }
+    .goal-card.over { background: #fef2f2; border-color: rgba(185,28,28,.24); }
+    .goal-top { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; margin-bottom: 8px; }
+    .goal-state { font-size: 11px; font-weight: 800; color: var(--muted); }
+    .goal-value { font-size: 24px; font-weight: 820; }
+    .goal-track { height: 8px; background: #e2e8f0; border-radius: 999px; overflow: hidden; margin: 8px 0; }
+    .goal-fill { height: 100%; background: var(--accent); border-radius: 999px; }
+    .goal-card.over .goal-fill { background: #dc2626; }
+    .goal-card.watch .goal-fill { background: #c2410c; }
     .breakdown {
       display: grid;
       grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -1075,6 +1187,7 @@ INDEX_HTML = r"""<!doctype html>
       .insights { grid-template-columns: 1fr; }
       .focus-lab { grid-template-columns: 1fr; }
       .metric-grid { grid-template-columns: repeat(2, 1fr); }
+      .goal-grid { grid-template-columns: repeat(2, 1fr); }
       .breakdown { grid-template-columns: repeat(2, 1fr); }
       .pairing { grid-template-columns: 1fr; }
       .connection-row { grid-template-columns: 1fr; }
@@ -1085,6 +1198,7 @@ INDEX_HTML = r"""<!doctype html>
       .grid { grid-template-columns: 1fr; }
       .value { font-size: 28px; }
       .metric-grid { grid-template-columns: 1fr; }
+      .goal-grid { grid-template-columns: 1fr; }
       .breakdown { grid-template-columns: 1fr; }
       .hours { grid-template-columns: repeat(12, 1fr); row-gap: 20px; }
       .cal-day { min-height: 58px; padding: 5px; }
@@ -1138,6 +1252,15 @@ INDEX_HTML = r"""<!doctype html>
           <ul class="actions" id="focusActions"></ul>
         </div>
       </div>
+    </section>
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Goals</h2>
+        <div class="hint">怒らない目標。残り具合だけ見る</div>
+      </div>
+      <div class="goal-summary" id="goalSummary">目標を確認中...</div>
+      <div class="goal-grid" id="goalGrid"></div>
+      <div class="sub">設定は <span class="mono">local_data/goals.json</span> で上書きできます。</div>
     </section>
     <section class="panel">
       <div class="panel-head">
@@ -1233,6 +1356,7 @@ INDEX_HTML = r"""<!doctype html>
       document.getElementById('median').textContent = fmtHours(data.stats.medianHours);
       document.getElementById('max').textContent = fmtHours(data.stats.maxHours);
       renderFocusLab(data.focusLab || {});
+      renderGoals(data.goalsPanel || {});
       renderSender(data);
       renderInsights(data);
       renderCalendar(data.calendar);
@@ -1254,6 +1378,22 @@ INDEX_HTML = r"""<!doctype html>
       document.getElementById('recent').innerHTML = data.recent.length ? data.recent.map(r =>
         `<tr><td>${esc(r.time)}</td><td>${esc(r.name)}</td><td>${esc(r.title)}</td><td>${fmtMinutes(r.minutes)}</td></tr>`
       ).join('') : '<tr><td colspan="4" class="empty">今日の記録がまだ少ないです</td></tr>';
+    }
+
+    function renderGoals(panel) {
+      document.getElementById('goalSummary').textContent = panel.summary || '目標データがまだありません。';
+      const goals = Array.isArray(panel.goals) ? panel.goals : [];
+      document.getElementById('goalGrid').innerHTML = goals.map(goal => {
+        const value = `${goal.value}${goal.unit}`;
+        const target = `${goal.type === 'target' ? '目標' : '上限'} ${goal.target}${goal.unit}`;
+        const fill = Math.min(100, Math.max(0, Number(goal.progress || 0)));
+        return `<div class="goal-card ${esc(goal.state)}">
+          <div class="goal-top"><div class="label">${esc(goal.label)}</div><div class="goal-state">${esc(goal.message)}</div></div>
+          <div class="goal-value">${esc(value)}</div>
+          <div class="goal-track"><div class="goal-fill" style="width:${fill}%"></div></div>
+          <div class="sub">${esc(target)} / 残り ${esc(goal.remaining)}${esc(goal.unit)}</div>
+        </div>`;
+      }).join('');
     }
 
     function renderFocusLab(focus) {

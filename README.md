@@ -27,6 +27,7 @@ PCの作業時間だけ見ても、生活の画面時間は半分しか見えま
 | --- | --- |
 | 今日の合計 | PC + Android の合算スクリーンタイム |
 | Focus Lab | 集中度、切り替え回数、スマホ比率、夜の吸引力を読む |
+| Goals | 画面時間、スマホ時間、Deep Work、Night Driftの目標を見る |
 | 月間カレンダー | よく使った日ほど濃くなる。PC/Androidの比率も見える |
 | アプリランキング | どのアプリが時間を持っていったか |
 | ウィンドウランキング | 作業、ブラウザ、動画、調べ物の粒度まで見える |
@@ -65,6 +66,19 @@ flowchart LR
 - `Confidence`: 分析に使えたイベント量から見た信頼度
 
 さらに、その日の形に応じた短い読み解きを出します。
+
+## Goals Without Nagging
+
+目標は通知で怒るためではなく、残り具合を見るためにあります。
+
+デフォルトでは以下を表示します。
+
+- screen time under 6h
+- Android under 2h
+- Deep Work over 60m
+- Night Drift under 25%
+
+`local_data/goals.json` を作ると、ローカルで自分用に上書きできます。`local_data/` はGit管理外です。
 
 ## Quick Start
 

@@ -88,14 +88,16 @@ This matters because the dashboard is no longer just decorative. Once it gives a
 
 ## Phase 2: Goals Without Nagging
 
-Add a local `goals.json` with simple rules:
+Implemented as a light local panel.
+
+The dashboard reads `local_data/goals.json` when present, otherwise it uses default rules:
 
 - Android under N minutes
 - screen time under N hours
 - deep work over N minutes
 - no screen drift after 21:00
 
-The dashboard should show progress, not yell.
+The dashboard shows progress, not blame. The goal is to help the user choose the rest of the day, not punish the past.
 
 ## Phase 3: Weekly Story
 
