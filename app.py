@@ -441,9 +441,119 @@ def round_hours(seconds: float) -> float:
     return round(seconds / 3600, 2)
 
 
+def clamp(value: float, low: float, high: float) -> float:
+    return max(low, min(high, value))
+
+
 def median(values: list[float]) -> float:
     clean = [v for v in values if v > 0]
     return statistics.median(clean) if clean else 0.0
+
+
+def build_focus_lab(activity_events: list[dict], pc_seconds: float, android_seconds: float, hourly_seconds: list[float]) -> dict:
+    events = sorted(
+        [event for event in activity_events if event.get("duration", 0) >= 10 and event.get("start")],
+        key=lambda item: item["start"],
+    )
+    total_seconds = pc_seconds + android_seconds
+    if total_seconds <= 0:
+        return {
+            "score": 0,
+            "grade": "NO DATA",
+            "summary": "まだ分析できるだけの画面時間がありません。",
+            "deepWorkMinutes": 0,
+            "longestBlockMinutes": 0,
+            "contextSwitches": 0,
+            "switchesPerHour": 0,
+            "androidShare": 0,
+            "nightShare": 0,
+            "cards": [],
+            "recommendations": ["ActivityWatchとAndroid Senderが動くと、ここに集中度の読み解きが出ます。"],
+        }
+
+    blocks = []
+    current = None
+    for event in events:
+        start = event["start"]
+        duration_seconds = float(event.get("duration") or 0.0)
+        end = start + timedelta(seconds=duration_seconds)
+        label = str(event.get("label") or "unknown")
+        source = str(event.get("source") or "pc")
+        if current and current["label"] == label and current["source"] == source and (start - current["end"]).total_seconds() <= 300:
+            current["end"] = max(current["end"], end)
+            current["seconds"] += duration_seconds
+        else:
+            current = {"label": label, "source": source, "start": start, "end": end, "seconds": duration_seconds}
+            blocks.append(current)
+
+    context_switches = 0
+    for previous, current_block in zip(blocks, blocks[1:]):
+        gap = (current_block["start"] - previous["end"]).total_seconds()
+        if gap <= 300 and previous["seconds"] >= 60 and current_block["seconds"] >= 60:
+            context_switches += 1
+
+    pc_blocks = [block for block in blocks if block["source"] == "pc"]
+    deep_blocks = [block for block in pc_blocks if block["seconds"] >= 25 * 60]
+    deep_work_seconds = sum(block["seconds"] for block in deep_blocks)
+    longest_block_seconds = max([block["seconds"] for block in blocks] or [0.0])
+    active_hours = max(total_seconds / 3600, 0.1)
+    pc_hours = max(pc_seconds / 3600, 0.1)
+    switches_per_hour = context_switches / active_hours
+    android_share = android_seconds / total_seconds if total_seconds else 0.0
+    night_seconds = sum(hourly_seconds[21:24])
+    night_share = night_seconds / total_seconds if total_seconds else 0.0
+    deep_ratio = deep_work_seconds / pc_seconds if pc_seconds else 0.0
+
+    switch_penalty = min(22, switches_per_hour * 3)
+    android_penalty = min(20, max(0.0, android_share - 0.15) * 45)
+    night_penalty = min(16, max(0.0, night_share - 0.22) * 45)
+    deep_bonus = min(18, deep_ratio * 35)
+    score = 72 + deep_bonus - switch_penalty - android_penalty - night_penalty
+    score = int(round(clamp(score, 0, 100)))
+
+    if score >= 82:
+        grade = "DEEP"
+        summary = "かなり集中寄り。画面時間が作業の形になっています。"
+    elif score >= 64:
+        grade = "STEADY"
+        summary = "悪くない安定感。切り替えを少し減らすともっと伸びます。"
+    elif score >= 42:
+        grade = "SCATTERED"
+        summary = "やや散らかり気味。スマホ比率かアプリ切り替えが集中を削っています。"
+    else:
+        grade = "DRIFT"
+        summary = "流されやすい日。まずは短い集中ブロックを一つ作るのが良さそうです。"
+
+    recommendations = []
+    if switches_per_hour >= 8:
+        recommendations.append("アプリ切り替えが多め。25分だけ主役アプリを一つに絞ると見え方が変わります。")
+    if android_share >= 0.35:
+        recommendations.append("Android比率が高め。スマホを見る前にPC側で目的を一行だけ決めると吸われにくいです。")
+    if night_share >= 0.28:
+        recommendations.append("夜の画面時間が濃いです。21時以降のピークを一段薄くできると睡眠側に効きます。")
+    if deep_ratio < 0.18 and pc_seconds / 60 >= 60:
+        recommendations.append("PC時間のわりに25分以上の塊が少なめ。通知を切った短い作業島を作る価値があります。")
+    if not recommendations:
+        recommendations.append("今日の形はかなり良いです。このリズムを週単位で見られるようにすると強いです。")
+
+    return {
+        "score": score,
+        "grade": grade,
+        "summary": summary,
+        "deepWorkMinutes": round_minutes(deep_work_seconds),
+        "longestBlockMinutes": round_minutes(longest_block_seconds),
+        "contextSwitches": context_switches,
+        "switchesPerHour": round(switches_per_hour, 1),
+        "androidShare": round(android_share * 100, 1),
+        "nightShare": round(night_share * 100, 1),
+        "cards": [
+            {"label": "Deep Work", "value": f"{round_minutes(deep_work_seconds)}m", "sub": "25分以上のPC集中ブロック"},
+            {"label": "Switching", "value": f"{context_switches}", "sub": f"1時間あたり {round(switches_per_hour, 1)} 回"},
+            {"label": "Android Pull", "value": f"{round(android_share * 100, 1)}%", "sub": "全画面時間に占めるスマホ比率"},
+            {"label": "Night Drift", "value": f"{round(night_share * 100, 1)}%", "sub": "21時以降に寄った割合"},
+        ],
+        "recommendations": recommendations[:3],
+    }
 
 
 def day_bounds(days: int) -> list[tuple[datetime, datetime]]:
@@ -551,6 +661,7 @@ def collect_summary(days: int) -> dict:
     title_seconds: dict[str, float] = {}
     hourly_seconds = [0.0 for _ in range(24)]
     usage_by_date: dict[str, dict] = {}
+    activity_timeline: list[dict] = []
     today_events = []
 
     def usage_for(dt: datetime) -> dict:
@@ -574,6 +685,7 @@ def collect_summary(days: int) -> dict:
                 if title:
                     title_seconds[title] = title_seconds.get(title, 0.0) + sec
                 hourly_seconds[event_local.hour] += sec
+                activity_timeline.append({"start": event_local, "duration": sec, "label": label, "source": "pc"})
             if today_start <= event_local <= today_end:
                 today_events.append(event)
 
@@ -598,6 +710,7 @@ def collect_summary(days: int) -> dict:
                 label = event_label(event, "android")
                 app_seconds[f"Android: {label}"] = app_seconds.get(f"Android: {label}", 0.0) + sec
                 hourly_seconds[event_local.hour] += sec
+                activity_timeline.append({"start": event_local, "duration": sec, "label": label, "source": "android"})
             if today_start <= event_local <= today_end:
                 today_events.append(event)
 
@@ -613,6 +726,7 @@ def collect_summary(days: int) -> dict:
                 label = event_label(event, "android")
                 app_seconds[f"Android: {label}"] = app_seconds.get(f"Android: {label}", 0.0) + sec
                 hourly_seconds[event_local.hour] += sec
+                activity_timeline.append({"start": event_local, "duration": sec, "label": label, "source": "android"})
             if today_start <= event_local <= today_end:
                 today_events.append(event)
 
@@ -629,6 +743,7 @@ def collect_summary(days: int) -> dict:
             label = event_label(event, "android")
             app_seconds[f"Android: {label}"] = app_seconds.get(f"Android: {label}", 0.0) + sec
             hourly_seconds[event_local.hour] += sec
+            activity_timeline.append({"start": event_local, "duration": sec, "label": label, "source": "android"})
         if today_start <= event_local <= today_end:
             today_events.append(event)
 
@@ -645,6 +760,7 @@ def collect_summary(days: int) -> dict:
             label = event_label(event, "android")
             app_seconds[f"Android: {label}"] = app_seconds.get(f"Android: {label}", 0.0) + sec
             hourly_seconds[event_local.hour] += sec
+            activity_timeline.append({"start": event_local, "duration": sec, "label": label, "source": "android"})
         if today_start <= event_local <= today_end:
             today_events.append(event)
 
@@ -691,6 +807,8 @@ def collect_summary(days: int) -> dict:
     today_events = sorted(today_events, key=lambda e: e.get("timestamp") or "", reverse=True)[:24]
     sender_status = get_sender_status()
     sender_status["minutesSinceLastReceived"] = minutes_since_iso(sender_status.get("last_received_at"))
+    total_pc_seconds = max(total_window_seconds, total_afk_active_seconds)
+    total_screen_seconds = total_pc_seconds + total_android_seconds
 
     result = {
         "ok": True,
@@ -713,9 +831,12 @@ def collect_summary(days: int) -> dict:
             "pcWindowHours": round_hours(total_window_seconds),
             "pcActiveHours": round_hours(total_afk_active_seconds),
             "androidHours": round_hours(total_android_seconds),
+            "pcHours": round_hours(total_pc_seconds),
+            "screenHours": round_hours(total_screen_seconds),
             "senderTodayHours": round_hours(sender_today_seconds),
             "senderPeriodHours": round_hours(sender_period_seconds),
         },
+        "focusLab": build_focus_lab(activity_timeline, total_pc_seconds, total_android_seconds, hourly_seconds),
         "daily": daily,
         "calendar": build_calendar(usage_by_date),
         "hourly": [{"hour": h, "minutes": round_minutes(sec)} for h, sec in enumerate(hourly_seconds)],
@@ -813,6 +934,33 @@ INDEX_HTML = r"""<!doctype html>
     .label { color: var(--muted); font-size: 13px; margin-bottom: 8px; }
     .value { font-size: 32px; font-weight: 750; letter-spacing: 0; }
     .sub { color: var(--muted); font-size: 13px; margin-top: 6px; }
+    .focus-lab { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 18px; align-items: stretch; }
+    .score-dial {
+      border-radius: 8px;
+      background: linear-gradient(155deg, #0f172a, #0f766e);
+      color: #f8fafc;
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      min-height: 210px;
+    }
+    .score-dial .label { color: rgba(248,250,252,.72); }
+    .score { font-size: 62px; line-height: .95; font-weight: 850; letter-spacing: 0; }
+    .grade { display: inline-flex; align-self: flex-start; padding: 5px 9px; border-radius: 999px; background: rgba(255,255,255,.14); font-size: 12px; font-weight: 800; }
+    .focus-copy { display: flex; flex-direction: column; gap: 12px; }
+    .focus-summary { font-size: 17px; font-weight: 750; line-height: 1.6; }
+    .metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+    .metric {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f8fafc;
+      padding: 11px;
+      min-height: 86px;
+    }
+    .metric strong { display: block; font-size: 24px; margin: 5px 0 3px; }
+    .actions { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+    .actions li { border-left: 3px solid var(--accent); padding: 7px 10px; background: #f8fafc; border-radius: 6px; color: #334155; }
     .layout { display: grid; grid-template-columns: 1.15fr .85fr; gap: 16px; align-items: start; }
     .panel { padding: 16px; margin-bottom: 16px; }
     h2 { margin: 0 0 12px; font-size: 17px; }
@@ -880,6 +1028,8 @@ INDEX_HTML = r"""<!doctype html>
       .grid { grid-template-columns: repeat(2, 1fr); }
       .layout { grid-template-columns: 1fr; }
       .insights { grid-template-columns: 1fr; }
+      .focus-lab { grid-template-columns: 1fr; }
+      .metric-grid { grid-template-columns: repeat(2, 1fr); }
       .pairing { grid-template-columns: 1fr; }
       .connection-row { grid-template-columns: 1fr; }
       .qr-box { justify-self: start; }
@@ -888,6 +1038,7 @@ INDEX_HTML = r"""<!doctype html>
       main { padding: 14px; }
       .grid { grid-template-columns: 1fr; }
       .value { font-size: 28px; }
+      .metric-grid { grid-template-columns: 1fr; }
       .hours { grid-template-columns: repeat(12, 1fr); row-gap: 20px; }
       .cal-day { min-height: 58px; padding: 5px; }
       .cal-hours { font-size: 13px; }
@@ -918,6 +1069,26 @@ INDEX_HTML = r"""<!doctype html>
       <div class="card"><div class="label">期間合計</div><div class="value" id="period">--</div><div class="sub" id="periodSub">--</div></div>
       <div class="card"><div class="label">1日平均</div><div class="value" id="average">--</div><div class="sub">中央値 <span id="median">--</span></div></div>
       <div class="card"><div class="label">最大の日</div><div class="value" id="max">--</div><div class="sub">使いすぎ検知の基準にできる</div></div>
+    </section>
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Focus Lab</h2>
+        <div class="hint">時間の量ではなく、画面時間の質を見る</div>
+      </div>
+      <div class="focus-lab">
+        <div class="score-dial">
+          <div>
+            <div class="label">Focus Score</div>
+            <div class="score" id="focusScore">--</div>
+          </div>
+          <div class="grade" id="focusGrade">--</div>
+        </div>
+        <div class="focus-copy">
+          <div class="focus-summary" id="focusSummary">分析中...</div>
+          <div class="metric-grid" id="focusCards"></div>
+          <ul class="actions" id="focusActions"></ul>
+        </div>
+      </div>
     </section>
     <section class="panel">
       <div class="panel-head">
@@ -1011,6 +1182,7 @@ INDEX_HTML = r"""<!doctype html>
       document.getElementById('average').textContent = fmtHours(data.stats.averageHours);
       document.getElementById('median').textContent = fmtHours(data.stats.medianHours);
       document.getElementById('max').textContent = fmtHours(data.stats.maxHours);
+      renderFocusLab(data.focusLab || {});
       renderSender(data);
       renderInsights(data);
       renderCalendar(data.calendar);
@@ -1032,6 +1204,22 @@ INDEX_HTML = r"""<!doctype html>
       document.getElementById('recent').innerHTML = data.recent.length ? data.recent.map(r =>
         `<tr><td>${esc(r.time)}</td><td>${esc(r.name)}</td><td>${esc(r.title)}</td><td>${fmtMinutes(r.minutes)}</td></tr>`
       ).join('') : '<tr><td colspan="4" class="empty">今日の記録がまだ少ないです</td></tr>';
+    }
+
+    function renderFocusLab(focus) {
+      document.getElementById('focusScore').textContent = focus.score ?? '--';
+      document.getElementById('focusGrade').textContent = focus.grade || '--';
+      document.getElementById('focusSummary').textContent = focus.summary || 'まだ分析できるだけのデータがありません。';
+      const cards = Array.isArray(focus.cards) ? focus.cards : [];
+      document.getElementById('focusCards').innerHTML = cards.map(card => `
+        <div class="metric">
+          <div class="label">${esc(card.label)}</div>
+          <strong>${esc(card.value)}</strong>
+          <div class="sub">${esc(card.sub)}</div>
+        </div>
+      `).join('');
+      const actions = Array.isArray(focus.recommendations) ? focus.recommendations : [];
+      document.getElementById('focusActions').innerHTML = actions.map(action => `<li>${esc(action)}</li>`).join('');
     }
 
     function renderSender(data) {
