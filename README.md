@@ -79,6 +79,12 @@ Android側はこの情報を保存し、以後は `POST /api/android/events` に
 
 Androidアプリ本体は `android-sender/` にあります。Android Studioで開いて `app` モジュールをビルドします。
 
+ローカルでビルドしたdebug APKは以下に出ます。
+
+```text
+android-sender/app/build/outputs/apk/debug/app-debug.apk
+```
+
 ## Data Safety
 
 このアプリはActivityWatchのローカルAPIを読み取るだけです。ActivityWatchのデータを書き換えません。

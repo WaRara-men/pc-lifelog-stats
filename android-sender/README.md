@@ -28,6 +28,18 @@ Open this `android-sender` folder in Android Studio and build the `app` module.
 
 This repository does not include a Gradle wrapper yet. Android Studio can use its bundled Gradle/JDK to sync the project.
 
+From a prepared command-line environment:
+
+```powershell
+gradle assembleDebug
+```
+
+The debug APK is created at:
+
+```text
+app/build/outputs/apk/debug/app-debug.apk
+```
+
 ## Permissions
 
 The app requires:
