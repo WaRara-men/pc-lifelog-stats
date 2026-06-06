@@ -12,6 +12,8 @@ The app is designed around one-time QR pairing:
 
 After pairing, the QR is not needed again. The app stores the PC endpoints and token locally on the phone.
 
+Automatic sync uses WorkManager with an unmetered-network constraint, so it is intended to run on Wi-Fi rather than burn through mobile data. Manual Sync now still runs immediately when you press it.
+
 ## Connection Strategy
 
 The QR can contain multiple endpoints:

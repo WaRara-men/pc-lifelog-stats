@@ -352,6 +352,16 @@ def get_sender_status() -> dict:
     return status
 
 
+def minutes_since_iso(value: str | None) -> int | None:
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return max(0, int((datetime.now(JST) - dt.astimezone(JST)).total_seconds() // 60))
+
+
 def refresh_android_imports_if_needed() -> dict:
     if not IMPORT_SOURCES_PATH.exists():
         return {"enabled": False, "updated": False, "sources": 0}
@@ -642,6 +652,19 @@ def collect_summary(days: int) -> dict:
     total_window_seconds = 0.0
     total_afk_active_seconds = 0.0
     total_android_seconds = 0.0
+    sender_period_seconds = 0.0
+    sender_today_seconds = 0.0
+
+    for event in sender_android_events:
+        event_start = parse_aw_time(event.get("timestamp"))
+        if not event_start:
+            continue
+        event_local = event_start.astimezone(JST)
+        sec = duration(event)
+        if selected_start <= event_local < selected_end:
+            sender_period_seconds += sec
+        if today_start <= event_local <= today_end:
+            sender_today_seconds += sec
 
     for start, end in bounds:
         usage = usage_by_date.get(start.strftime("%Y-%m-%d"), empty_usage())
@@ -666,6 +689,8 @@ def collect_summary(days: int) -> dict:
     top_apps = sorted(app_seconds.items(), key=lambda item: item[1], reverse=True)[:12]
     top_titles = sorted(title_seconds.items(), key=lambda item: item[1], reverse=True)[:12]
     today_events = sorted(today_events, key=lambda e: e.get("timestamp") or "", reverse=True)[:24]
+    sender_status = get_sender_status()
+    sender_status["minutesSinceLastReceived"] = minutes_since_iso(sender_status.get("last_received_at"))
 
     result = {
         "ok": True,
@@ -677,7 +702,7 @@ def collect_summary(days: int) -> dict:
         "androidBridgeUrl": ANDROID_AW_BASE,
         "importedAndroidEvents": len(imported_android_events),
         "senderAndroidEvents": len(sender_android_events),
-        "senderStatus": get_sender_status(),
+        "senderStatus": sender_status,
         "androidImportStatus": import_status,
         "stats": {
             "todayHours": daily[-1]["totalHours"] if daily else 0,
@@ -688,6 +713,8 @@ def collect_summary(days: int) -> dict:
             "pcWindowHours": round_hours(total_window_seconds),
             "pcActiveHours": round_hours(total_afk_active_seconds),
             "androidHours": round_hours(total_android_seconds),
+            "senderTodayHours": round_hours(sender_today_seconds),
+            "senderPeriodHours": round_hours(sender_period_seconds),
         },
         "daily": daily,
         "calendar": build_calendar(usage_by_date),
@@ -819,6 +846,10 @@ INDEX_HTML = r"""<!doctype html>
     .insight span { color: var(--muted); font-size: 13px; }
     .pairing { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 16px; align-items: center; }
     .pairing-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+    .connection-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 10px 0 12px; }
+    .connection-pill { border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: #f8fafc; }
+    .connection-pill.ok { border-color: rgba(15,118,110,.35); background: #ecfdf5; }
+    .connection-pill strong { display: block; font-size: 18px; margin-top: 4px; }
     .qr-box { display: none; justify-self: end; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
     .qr-box.visible { display: block; }
     .qr-box img { display: block; width: 190px; height: 190px; }
@@ -850,6 +881,7 @@ INDEX_HTML = r"""<!doctype html>
       .layout { grid-template-columns: 1fr; }
       .insights { grid-template-columns: 1fr; }
       .pairing { grid-template-columns: 1fr; }
+      .connection-row { grid-template-columns: 1fr; }
       .qr-box { justify-self: start; }
     }
     @media (max-width: 520px) {
@@ -895,6 +927,11 @@ INDEX_HTML = r"""<!doctype html>
       <div class="pairing">
         <div>
           <div id="senderSummary" class="sub">接続状態を確認中...</div>
+          <div class="connection-row">
+            <div class="connection-pill" id="senderConnectionPill"><div class="label">接続</div><strong id="senderConnection">--</strong></div>
+            <div class="connection-pill"><div class="label">今日の自動送信分</div><strong id="senderToday">--</strong></div>
+            <div class="connection-pill"><div class="label">Android合計</div><strong id="androidTotal">--</strong></div>
+          </div>
           <div id="senderUrl" class="mono"></div>
           <div id="senderEndpoints" class="endpoint-list mono"></div>
           <div class="pairing-actions">
@@ -999,9 +1036,15 @@ INDEX_HTML = r"""<!doctype html>
 
     function renderSender(data) {
       const status = data.senderStatus || {};
-      const last = status.last_received_at ? `最終受信 ${status.last_received_at.replace('T', ' ')}` : 'まだSenderからの受信なし';
+      const mins = status.minutesSinceLastReceived;
+      const fresh = typeof mins === 'number' && mins <= 30;
+      const last = status.last_received_at ? `最終受信 ${status.last_received_at.replace('T', ' ')} (${mins}分前)` : 'まだSenderからの受信なし';
       const events = Number(data.senderAndroidEvents || 0);
       document.getElementById('senderSummary').textContent = `Senderイベント ${events}件 / ${last}`;
+      document.getElementById('senderConnection').textContent = fresh ? 'ONLINE' : (events > 0 ? '受信あり' : '未接続');
+      document.getElementById('senderConnectionPill').classList.toggle('ok', fresh || events > 0);
+      document.getElementById('senderToday').textContent = fmtHours(data.stats.senderTodayHours || 0);
+      document.getElementById('androidTotal').textContent = fmtHours(data.stats.androidHours || 0);
       document.getElementById('senderUrl').textContent = status.receiver ? `優先受信先: ${status.receiver}` : '';
       const endpoints = Array.isArray(status.endpoints) ? status.endpoints : [];
       document.getElementById('senderEndpoints').innerHTML = endpoints.map(ep =>
