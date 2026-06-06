@@ -1,57 +1,59 @@
 # PC Lifelog Stats
 
-Windows PCとAndroidスマホのスクリーンタイムを、ひとつのローカル画面で見るためのライフログダッシュボードです。
+<p align="center">
+  <img src="docs/readme-hero.svg" alt="PC Lifelog Stats preview: PC and Android screen time in one local dashboard" width="100%">
+</p>
 
-PC側はActivityWatch、Android側は同梱の **PC Lifelog Sender** から取得します。スマホは初回だけPC画面のQRを読み取ればOK。以後はWi-Fi接続時に15分ごとに自動送信され、PCのカレンダー、ランキング、時間帯ヒートに合算されます。
+<p align="center">
+  <img alt="Windows" src="https://img.shields.io/badge/Windows-11-2563eb?style=for-the-badge&logo=windows11&logoColor=white">
+  <img alt="ActivityWatch" src="https://img.shields.io/badge/ActivityWatch-local%20API-0f766e?style=for-the-badge">
+  <img alt="Android" src="https://img.shields.io/badge/Android-QR%20pairing-7c3aed?style=for-the-badge&logo=android&logoColor=white">
+  <img alt="Local first" src="https://img.shields.io/badge/local--first-no%20cloud-111827?style=for-the-badge">
+</p>
 
-**Highlights**
+PCとAndroidのスクリーンタイムを、ひとつのローカル画面で見るためのライフログダッシュボードです。
 
-- PCとAndroidの使用時間を同じ画面で合算
-- 初回だけQRペアリング、その後はQR不要
-- Androidは15分ごとにWi-Fiで自動送信
-- 接続状態、最終受信時刻、今日のスマホ使用時間をダッシュボードに表示
-- 個人ログとtokenは `local_data/` に保存し、Gitには載せないlocal-first設計
+ActivityWatchのPCログに、同梱のAndroid companion app **PC Lifelog Sender** を重ねます。スマホは初回だけPC画面のQRを読むだけ。あとはWi-Fi接続時に15分ごとに送られ、カレンダー、ランキング、時間帯ヒート、今日の合計に自然に混ざります。
 
-![Dashboard preview](https://raw.githubusercontent.com/WaRara-men/pc-lifelog-stats/main/docs/dashboard-preview.svg)
+## The Idea
 
-## What It Shows
+PCの作業時間だけ見ても、生活の画面時間は半分しか見えません。
 
-- 今日どれだけPC/Androidを使ったか
-- 直近1日、7日、14日、30日の合計・平均・中央値・最大
-- 使用時間で色が濃くなる月間カレンダー
-- アプリ別の使用時間ランキング
-- ウィンドウタイトル別の使用時間ランキング
-- 何時台によく使っているかが分かる時間帯ヒート
-- 最近のアクティビティ一覧
-- Android Senderの接続状態と最終受信
+このアプリは「PCを何時間見たか」から一歩進んで、「今日、自分はどの画面とどう付き合っていたか」を見える形にします。責めるための監視ではなく、自分のリズムを取り戻すための観測所です。
 
-## Android Companion
+## What You Get
 
-このリポジトリには、Android端末からPCへスクリーンタイムを送る companion app が入っています。
+| View | What it tells you |
+| --- | --- |
+| 今日の合計 | PC + Android の合算スクリーンタイム |
+| 月間カレンダー | よく使った日ほど濃くなる。PC/Androidの比率も見える |
+| アプリランキング | どのアプリが時間を持っていったか |
+| ウィンドウランキング | 作業、ブラウザ、動画、調べ物の粒度まで見える |
+| 時間帯ヒート | 何時台に画面へ吸い寄せられているか |
+| Android連携パネル | ONLINE/OFFLINE、最終受信、今日のスマホ分を確認 |
 
-PC側のダッシュボードで `Android連携` のQRを表示し、Androidアプリ **PC Lifelog Sender** で一度だけ読み取ります。スマホ側に接続先とtokenが保存されるので、次回以降はQRを読み直す必要がありません。
+## Android Sync Is Built In
 
-自動同期はWi-Fiなどの非従量課金ネットワークで動く設計です。機内モードや外出中で送れなかった分は端末内に残り、次に送れるタイミングでまとめてPCへ送信します。
+普通のActivityWatchダッシュボードではなく、このプロジェクトの面白いところはここです。
 
-## Why
+```mermaid
+flowchart LR
+  PC["PC dashboard<br/>shows QR once"] --> Phone["Android<br/>PC Lifelog Sender"]
+  Phone --> Store["phone saves<br/>server + token"]
+  Store --> Sync["15 min Wi-Fi sync"]
+  Sync --> Dash["one dashboard<br/>PC + Android"]
+```
 
-ActivityWatchは強力ですが、「とりあえず今日どれだけ見たか」「今月の濃い日がどこか」を一目で見るには少し距離があります。
-
-このアプリは、細かいログを読むためだけではなく、自分の生活リズムをぱっと掴むための画面です。PCとスマホを別々に眺めるのではなく、「今日、自分は画面とどう付き合っていたか」をひと目で見えるようにすることを目指しています。
-
-## Requirements
-
-- Windows 11
-- Python 3.12+
-- ActivityWatch desktop app
-- ActivityWatch local API: `http://localhost:5600/api/0`
+- PC側でQRを表示
+- Androidアプリで一度だけ読み取り
+- 以後QR不要
+- Wi-Fiなどの非従量課金ネットワークで自動送信
+- 送れなかった分は端末内に残り、次に送れるタイミングでまとめて送信
+- tokenや個人ログは `local_data/` に保存し、Gitには載せない
 
 ## Quick Start
 
-1. ActivityWatchを起動します。
-2. このリポジトリをダウンロードまたはcloneします。
-3. `start_dashboard.bat` をダブルクリックします。
-4. ブラウザで `http://127.0.0.1:8765` が開きます。
+ActivityWatchを起動してから、このリポジトリを起動します。
 
 ```powershell
 git clone https://github.com/WaRara-men/pc-lifelog-stats.git
@@ -59,7 +61,9 @@ cd pc-lifelog-stats
 .\start_dashboard.bat
 ```
 
-## Start From Windows Search
+ブラウザで `http://127.0.0.1:8765` が開きます。
+
+## Start Like An App
 
 デスクトップにショートカットを増やしたくない場合は、スタートメニューにだけ登録できます。
 
@@ -69,9 +73,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install_start_menu_shortcu
 
 登録後は、Windowsキーを押して `lifelog` または `PC` と検索すると **PC Lifelog Stats** が出ます。
 
-## Pair Android by QR
-
-Android companion appを使う場合は、PC側にQRを表示して初回だけ読み取ります。読み取り後、スマホ側に接続先とtokenが保存されるため、次回以降QRは不要です。
+## Pair Android
 
 PC側の受信ポートをLAN内だけ許可します。
 
@@ -79,7 +81,7 @@ PC側の受信ポートをLAN内だけ許可します。
 powershell -NoProfile -ExecutionPolicy Bypass -File .\enable_android_sender_firewall.ps1
 ```
 
-ダッシュボードを開き、`Android連携` の `接続QRを表示` を押します。QRには以下が入ります。
+ダッシュボードを開き、`Android連携` の `接続QRを表示` を押します。QRには接続先とlocal tokenが入ります。
 
 ```json
 {
@@ -95,8 +97,6 @@ Android側はこの情報を保存し、以後は `POST /api/android/events` に
 
 Androidアプリ本体は `android-sender/` にあります。Android Studioで開いて `app` モジュールをビルドします。現時点では個人利用向けのdebug APKとして扱っています。
 
-ローカルでビルドしたdebug APKは以下に出ます。
-
 ```text
 android-sender/app/build/outputs/apk/debug/app-debug.apk
 ```
@@ -107,27 +107,13 @@ android-sender/app/build/outputs/apk/debug/app-debug.apk
 
 このリポジトリには、個人のActivityWatchログ、CSV、JSONL、DB、`.env`、秘密鍵、トークンを含めない方針です。`.gitignore` でもそれらを除外しています。
 
-## Android Logs
+## Android Export Fallback
 
-Android版ActivityWatchのバケットがPC側に同期されると、画面内で自動的に `Android:` として集計されます。
-
-まだ同期されていない場合は、ダッシュボード上に「AndroidのバケットはまだPC側に見えていません」と表示されます。
-
-AndroidアプリにExportが無い場合は、ADBでスマホ内のActivityWatch APIをPCへ橋渡しできます。
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\connect_android_adb.ps1
-```
-
-このスクリプトは、Android端末の `localhost:5600` をPCの `http://127.0.0.1:5601` に転送します。転送後、ダッシュボードはAndroidバケットを自動で読みます。
-
-Export JSONがある場合は、ローカルに取り込めます。
+Android Senderを使わず、ActivityWatch AndroidのExport JSONを取り込むこともできます。
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\import_android_export.ps1 "C:\path\to\aw-buckets-export.json"
 ```
-
-取り込んだデータは `local_data/android_events.json` に保存されます。`local_data/` はGit管理外です。
 
 同じExportファイルを継続して使う場合は、自動取り込み対象として登録できます。
 
@@ -135,17 +121,25 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\import_android_export.ps1 
 powershell -NoProfile -ExecutionPolicy Bypass -File .\watch_android_export.ps1 "C:\path\to\aw-buckets-export.json"
 ```
 
-登録後は、そのJSONの更新日時やサイズが変わると、ダッシュボードの更新時に自動で再取り込みされます。
+取り込んだデータは `local_data/android_events.json` に保存されます。`local_data/` はGit管理外です。
 
-## Project Status
+## Requirements
 
-Personal project.  
-今はローカル利用を前提にした軽量版です。
+- Windows 11
+- Python 3.12+
+- ActivityWatch desktop app
+- ActivityWatch local API: `http://localhost:5600/api/0`
+- Android companion app build: Android Studio or Gradle + Android SDK
 
-今後の候補:
+## Roadmap
 
 - カテゴリ分類
 - 週/月レポート
 - CSVエクスポート
 - より細かいAndroidアプリ分析
 - 使いすぎアラート
+
+## Status
+
+Personal local-first project.
+今は自分のPCとAndroidを軽くつなぎ、すぐ見えることを優先した版です。
